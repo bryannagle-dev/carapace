@@ -75,7 +75,7 @@ public partial class Main : Node
         int upperLegH = Math.Max(6, (int)MathF.Round(legTotal * 0.55f));
         int lowerLegH = Math.Max(6, legTotal - upperLegH);
         int footH = 2;
-        int footL = Math.Max(6, legD + 4);
+        int footL = Math.Max(5, legD + 2);
 
         int sizeX = Math.Max(torsoW + margin * 2, hipW + margin * 2);
         sizeX = Math.Max(sizeX, torsoW + margin * 2 + armLen * 2 + shoulderPad * 2);
@@ -102,6 +102,7 @@ public partial class Main : Node
         SmoothFrontProfile(grid, min, max);
         ClampChestFrontSpikes(grid, min, max);
         AddHipsAndLegs(grid, min, max, pelvisY, hipH, hipW, hipD, legGap, legW, legD, upperLegH, lowerLegH, footH, footL);
+        CleanupLowerLegRearOverhang(grid);
         AddShouldersNeckArms(grid, min, max, armLen, armThickY, armThickZ, shoulderPad, neckH, neckW);
         AddHead(grid, min, max, centerXf, centerZf, neckH, headH, headW, headD);
         MirrorXUnion(grid);
@@ -509,12 +510,17 @@ public partial class Main : Node
             rightX = leftX + legW + legGap;
         }
         int legZ = RoundToInt(centerZf - legD * 0.5f);
+        int legCenterZ = RoundToInt(centerZf);
+        int upperW = Math.Max(3, legW - 1);
+        int upperD = Math.Max(3, legD - 1);
+        int leftCenterX = leftX + legW / 2;
+        int rightCenterX = rightX + legW / 2;
 
         int legTopY = hipMin.Y;
-        Vector3I upperMinL = new(leftX, legTopY - upperLegH, legZ);
-        Vector3I upperMaxL = new(leftX + legW, legTopY, legZ + legD);
-        Vector3I upperMinR = new(rightX, legTopY - upperLegH, legZ);
-        Vector3I upperMaxR = new(rightX + legW, legTopY, legZ + legD);
+        Vector3I upperMinL = new(leftCenterX - upperW / 2, legTopY - upperLegH, legCenterZ - upperD / 2);
+        Vector3I upperMaxL = new(upperMinL.X + upperW, legTopY, upperMinL.Z + upperD);
+        Vector3I upperMinR = new(rightCenterX - upperW / 2, legTopY - upperLegH, legCenterZ - upperD / 2);
+        Vector3I upperMaxR = new(upperMinR.X + upperW, legTopY, upperMinR.Z + upperD);
 
         FillLimb(grid, upperMinL, upperMaxL, roundTop: true, taperEnd: 0.88f,
             rootStart: 0.7f, rootEnd: 1.0f, rootAmount: 0.18f,
@@ -525,12 +531,12 @@ public partial class Main : Node
             kneeStart: 0.7f, kneeEnd: 0.95f, kneeAmount: 0.12f,
             calfStart: 0f, calfEnd: 0f, calfAmount: 0f);
 
-        int lowerW = Math.Max(3, legW - 2);
-        int lowerD = Math.Max(3, legD - 2);
+        int lowerW = Math.Max(3, upperW - 2);
+        int lowerD = Math.Max(3, upperD - 2);
 
-        int upperCenterXL = RoundToInt(upperMinL.X + legW * 0.5f);
-        int upperCenterXR = RoundToInt(upperMinR.X + legW * 0.5f);
-        int upperCenterZ = RoundToInt(legZ + legD * 0.5f);
+        int upperCenterXL = RoundToInt(upperMinL.X + upperW * 0.5f);
+        int upperCenterXR = RoundToInt(upperMinR.X + upperW * 0.5f);
+        int upperCenterZ = RoundToInt(upperMinL.Z + upperD * 0.5f);
 
         Vector3I lowerMinL = new(upperCenterXL - lowerW / 2, upperMinL.Y - lowerLegH, upperCenterZ - lowerD / 2);
         Vector3I lowerMaxL = new(lowerMinL.X + lowerW, upperMinL.Y, lowerMinL.Z + lowerD);
@@ -540,25 +546,30 @@ public partial class Main : Node
         FillLimb(grid, lowerMinL, lowerMaxL, roundTop: false, taperEnd: 0.82f,
             rootStart: 0f, rootEnd: 0f, rootAmount: 0f,
             kneeStart: 0.02f, kneeEnd: 0.22f, kneeAmount: 0.1f,
-            calfStart: 0.18f, calfEnd: 0.7f, calfAmount: 0.18f);
+            calfStart: 0.2f, calfEnd: 0.68f, calfAmount: 0.12f);
         FillLimb(grid, lowerMinR, lowerMaxR, roundTop: false, taperEnd: 0.82f,
             rootStart: 0f, rootEnd: 0f, rootAmount: 0f,
             kneeStart: 0.02f, kneeEnd: 0.22f, kneeAmount: 0.1f,
-            calfStart: 0.18f, calfEnd: 0.7f, calfAmount: 0.18f);
+            calfStart: 0.2f, calfEnd: 0.68f, calfAmount: 0.12f);
 
         AddKneeCap(grid, upperMinL, upperMaxL, forwardOffset: 1);
         AddKneeCap(grid, upperMinR, upperMaxR, forwardOffset: 1);
+        PinchAnkle(grid, lowerMinL, lowerMaxL, layers: 2, inset: 1);
+        PinchAnkle(grid, lowerMinR, lowerMaxR, layers: 2, inset: 1);
+        TaperLowerLegBottom(grid, lowerMinL, lowerMaxL, layers: 2, insetStart: 1);
+        TaperLowerLegBottom(grid, lowerMinR, lowerMaxR, layers: 2, insetStart: 1);
 
-        int footW = Math.Max(3, lowerW);
-        int footD = Math.Max(3, lowerD);
+        int footW = Math.Min(lowerW, Math.Max(2, lowerW - 3));
+        int footD = Math.Min(lowerD, Math.Max(2, lowerD - 2));
+        int footLen = Math.Max(3, footL - 2);
 
-        Vector3I footMinL = new(lowerMinL.X + (lowerW - footW) / 2, lowerMinL.Y - footH, lowerMinL.Z + (lowerD - footD) / 2);
-        Vector3I footMaxL = new(footMinL.X + footW, lowerMinL.Y, footMinL.Z + footL);
-        Vector3I footMinR = new(lowerMinR.X + (lowerW - footW) / 2, lowerMinR.Y - footH, lowerMinR.Z + (lowerD - footD) / 2);
-        Vector3I footMaxR = new(footMinR.X + footW, lowerMinR.Y, footMinR.Z + footL);
+        int footMinZ = lowerMinL.Z + (lowerD - footD) / 2;
+        Vector3I footMinL = new(lowerMinL.X + (lowerW - footW) / 2, lowerMinL.Y - footH + 1, footMinZ);
+        Vector3I footMaxL = new(footMinL.X + footW, lowerMinL.Y + 1, footMinL.Z + footLen);
+        int footMinZR = lowerMinR.Z + (lowerD - footD) / 2;
+        Vector3I footMinR = new(lowerMinR.X + (lowerW - footW) / 2, lowerMinR.Y - footH + 1, footMinZR);
+        Vector3I footMaxR = new(footMinR.X + footW, lowerMinR.Y + 1, footMinR.Z + footLen);
 
-        AddAnkleFlare(grid, lowerMinL, lowerMaxL, footH);
-        AddAnkleFlare(grid, lowerMinR, lowerMaxR, footH);
         FillRoundedFoot(grid, footMinL, footMaxL);
         FillRoundedFoot(grid, footMinR, footMaxR);
     }
@@ -761,28 +772,22 @@ public partial class Main : Node
             return;
         }
 
-        float centerX = min.X + w * 0.5f;
-        float centerZ = min.Z + d * 0.5f;
-        float baseRx = MathF.Max(1f, w * 0.5f);
-        float baseRz = MathF.Max(1f, d * 0.5f);
-
-        for (int y = min.Y; y < max.Y; y++)
+        for (int z = min.Z; z < max.Z; z++)
         {
-            for (int z = min.Z; z < max.Z; z++)
-            {
-                float tz = d <= 1 ? 0f : (float)(z - min.Z) / (d - 1);
-                float widthScale = Lerp(1f, 0.82f, Smoothstep(0.3f, 1f, tz));
-                float rx = MathF.Max(1f, baseRx * widthScale);
-                float rz = MathF.Max(1f, baseRz);
+            float tz = d <= 1 ? 0f : (float)(z - min.Z) / (d - 1);
+            float widthScale = Lerp(1f, 0.35f, Smoothstep(0.2f, 1f, tz));
+            float heightScale = Lerp(1f, 0.55f, Smoothstep(0.4f, 1f, tz));
 
-                for (int x = min.X; x < max.X; x++)
+            int sliceW = Math.Clamp((int)MathF.Round(w * widthScale), 1, w);
+            int x0 = min.X + (w - sliceW) / 2;
+            int x1 = x0 + sliceW - 1;
+            int yMax = min.Y + Math.Max(1, (int)MathF.Round(h * heightScale));
+
+            for (int y = min.Y; y < yMax; y++)
+            {
+                for (int x = x0; x <= x1; x++)
                 {
-                    float dx = (x + 0.5f - centerX) / rx;
-                    float dz = (z + 0.5f - centerZ) / rz;
-                    if (dx * dx + dz * dz <= 1.0f)
-                    {
-                        grid.Set(x, y, z, 1);
-                    }
+                    grid.Set(x, y, z, 1);
                 }
             }
         }
@@ -811,27 +816,192 @@ public partial class Main : Node
         FillEllipsoid(grid, capMin, capMax);
     }
 
-    private static void AddAnkleFlare(VoxelGrid grid, Vector3I lowerMin, Vector3I lowerMax, int footH)
+    private static void PinchAnkle(VoxelGrid grid, Vector3I lowerMin, Vector3I lowerMax, int layers, int inset)
     {
         int w = lowerMax.X - lowerMin.X;
         int d = lowerMax.Z - lowerMin.Z;
-        if (w <= 0 || d <= 0)
+        int h = lowerMax.Y - lowerMin.Y;
+        if (w <= inset * 2 || d <= inset * 2 || h <= 0)
         {
             return;
         }
 
-        int ankleY = lowerMin.Y - Math.Max(1, footH / 2);
-        int centerX = (lowerMin.X + lowerMax.X) / 2;
-        int centerZ = (lowerMin.Z + lowerMax.Z) / 2;
+        int y0 = lowerMin.Y;
+        int y1 = Math.Min(lowerMax.Y, lowerMin.Y + Math.Max(1, layers));
 
-        int flareW = w + 2;
-        int flareD = d + 2;
-        int flareH = 2;
-
-        Vector3I flareMin = new(centerX - flareW / 2, ankleY - flareH / 2, centerZ - flareD / 2);
-        Vector3I flareMax = new(flareMin.X + flareW, ankleY + (flareH + 1) / 2, flareMin.Z + flareD);
-        FillEllipsoid(grid, flareMin, flareMax);
+        for (int y = y0; y < y1; y++)
+        {
+            for (int z = lowerMin.Z; z < lowerMax.Z; z++)
+            {
+                for (int x = lowerMin.X; x < lowerMax.X; x++)
+                {
+                    if (x <= lowerMin.X + inset - 1 ||
+                        x >= lowerMax.X - inset ||
+                        z <= lowerMin.Z + inset - 1 ||
+                        z >= lowerMax.Z - inset)
+                    {
+                        grid.Set(x, y, z, 0);
+                    }
+                }
+            }
+        }
     }
+
+    private static void TaperLowerLegBottom(VoxelGrid grid, Vector3I lowerMin, Vector3I lowerMax, int layers, int insetStart)
+    {
+        int w = lowerMax.X - lowerMin.X;
+        int d = lowerMax.Z - lowerMin.Z;
+        int h = lowerMax.Y - lowerMin.Y;
+        if (w <= insetStart * 2 || d <= insetStart * 2 || h <= 0)
+        {
+            return;
+        }
+
+        int maxLayers = Math.Min(layers, h);
+        for (int i = 0; i < maxLayers; i++)
+        {
+            int inset = insetStart + i;
+            if (w <= inset * 2 || d <= inset * 2)
+            {
+                break;
+            }
+
+            int y = lowerMin.Y + i;
+            for (int z = lowerMin.Z; z < lowerMax.Z; z++)
+            {
+                for (int x = lowerMin.X; x < lowerMax.X; x++)
+                {
+                    if (x <= lowerMin.X + inset - 1 ||
+                        x >= lowerMax.X - inset ||
+                        z <= lowerMin.Z + inset - 1 ||
+                        z >= lowerMax.Z - inset)
+                    {
+                        grid.Set(x, y, z, 0);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void CleanupLowerLegRearOverhang(VoxelGrid grid)
+    {
+        int minY = -1;
+        for (int y = 0; y < grid.SizeY; y++)
+        {
+            for (int z = 0; z < grid.SizeZ; z++)
+            {
+                for (int x = 0; x < grid.SizeX; x++)
+                {
+                    if (grid.GetSafe(x, y, z) != 0)
+                    {
+                        minY = y;
+                        goto FoundMinY;
+                    }
+                }
+            }
+        }
+
+    FoundMinY:
+        if (minY < 0)
+        {
+            return;
+        }
+
+        int footY0 = minY;
+        int footY1 = Math.Min(grid.SizeY - 1, minY + 1);
+
+        List<int> footXs = new();
+        List<(int x, int z)> footCoords = new();
+
+        for (int y = footY0; y <= footY1; y++)
+        {
+            for (int z = 0; z < grid.SizeZ; z++)
+            {
+                for (int x = 0; x < grid.SizeX; x++)
+                {
+                    if (grid.GetSafe(x, y, z) == 0)
+                    {
+                        continue;
+                    }
+
+                    footXs.Add(x);
+                    footCoords.Add((x, z));
+                }
+            }
+        }
+
+        if (footXs.Count == 0)
+        {
+            return;
+        }
+
+        footXs.Sort();
+        int splitIndex = -1;
+        int maxGap = 0;
+        for (int i = 0; i < footXs.Count - 1; i++)
+        {
+            int gap = footXs[i + 1] - footXs[i];
+            if (gap > maxGap)
+            {
+                maxGap = gap;
+                splitIndex = i;
+            }
+        }
+
+        float splitX = splitIndex >= 0 ? (footXs[splitIndex] + footXs[splitIndex + 1]) * 0.5f : footXs[0];
+
+        (int minX, int maxX, int minZ) left = (int.MaxValue, int.MinValue, int.MaxValue);
+        (int minX, int maxX, int minZ) right = (int.MaxValue, int.MinValue, int.MaxValue);
+
+        foreach ((int x, int z) in footCoords)
+        {
+            if (x < splitX)
+            {
+                if (x < left.minX) left.minX = x;
+                if (x > left.maxX) left.maxX = x;
+                if (z < left.minZ) left.minZ = z;
+            }
+            else
+            {
+                if (x < right.minX) right.minX = x;
+                if (x > right.maxX) right.maxX = x;
+                if (z < right.minZ) right.minZ = z;
+            }
+        }
+
+        int legY0 = Math.Min(grid.SizeY - 1, minY + 2);
+        int legY1 = Math.Min(grid.SizeY - 1, minY + 4);
+
+        if (left.minX <= left.maxX)
+        {
+            CarveRearOverhangBand(grid, left.minX, left.maxX, left.minZ, legY0, legY1);
+        }
+
+        if (right.minX <= right.maxX)
+        {
+            CarveRearOverhangBand(grid, right.minX, right.maxX, right.minZ, legY0, legY1);
+        }
+    }
+
+    private static void CarveRearOverhangBand(VoxelGrid grid, int minX, int maxX, int minZ, int y0, int y1)
+    {
+        if (minZ <= 0)
+        {
+            return;
+        }
+
+        for (int y = y0; y <= y1; y++)
+        {
+            for (int z = 0; z < minZ; z++)
+            {
+                for (int x = minX; x <= maxX; x++)
+                {
+                    grid.Set(x, y, z, 0);
+                }
+            }
+        }
+    }
+
 
     private static void FillRoundedHand(VoxelGrid grid, Vector3I min, Vector3I max)
     {
