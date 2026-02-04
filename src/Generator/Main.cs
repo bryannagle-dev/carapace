@@ -177,6 +177,11 @@ public partial class Main : Node
 
             float chestFactor = 1f + 0.16f * Smoothstep(0.5f, 0.62f, t) * (1f - Smoothstep(0.7f, 0.82f, t));
             float backFactor = 1f + 0.08f * Smoothstep(0.6f, 0.9f, t);
+            if (t > 0.7f)
+            {
+                float backTaper = Smoothstep(0.7f, 1f, t);
+                backFactor *= Lerp(1f, 0.92f, backTaper);
+            }
 
             float rzFront = rzBase * chestFactor;
             float rzBack = rzBase * backFactor;
@@ -512,9 +517,11 @@ public partial class Main : Node
         Vector3I upperMaxR = new(rightX + legW, legTopY, legZ + legD);
 
         FillLimb(grid, upperMinL, upperMaxL, roundTop: true, taperEnd: 0.88f,
+            rootStart: 0.7f, rootEnd: 1.0f, rootAmount: 0.18f,
             kneeStart: 0.7f, kneeEnd: 0.95f, kneeAmount: 0.12f,
             calfStart: 0f, calfEnd: 0f, calfAmount: 0f);
         FillLimb(grid, upperMinR, upperMaxR, roundTop: true, taperEnd: 0.88f,
+            rootStart: 0.7f, rootEnd: 1.0f, rootAmount: 0.18f,
             kneeStart: 0.7f, kneeEnd: 0.95f, kneeAmount: 0.12f,
             calfStart: 0f, calfEnd: 0f, calfAmount: 0f);
 
@@ -531,11 +538,16 @@ public partial class Main : Node
         Vector3I lowerMaxR = new(lowerMinR.X + lowerW, upperMinR.Y, lowerMinR.Z + lowerD);
 
         FillLimb(grid, lowerMinL, lowerMaxL, roundTop: false, taperEnd: 0.82f,
+            rootStart: 0f, rootEnd: 0f, rootAmount: 0f,
             kneeStart: 0.02f, kneeEnd: 0.22f, kneeAmount: 0.1f,
             calfStart: 0.18f, calfEnd: 0.7f, calfAmount: 0.18f);
         FillLimb(grid, lowerMinR, lowerMaxR, roundTop: false, taperEnd: 0.82f,
+            rootStart: 0f, rootEnd: 0f, rootAmount: 0f,
             kneeStart: 0.02f, kneeEnd: 0.22f, kneeAmount: 0.1f,
             calfStart: 0.18f, calfEnd: 0.7f, calfAmount: 0.18f);
+
+        AddKneeCap(grid, upperMinL, upperMaxL, forwardOffset: 1);
+        AddKneeCap(grid, upperMinR, upperMaxR, forwardOffset: 1);
 
         int footW = Math.Max(3, lowerW);
         int footD = Math.Max(3, lowerD);
@@ -545,6 +557,8 @@ public partial class Main : Node
         Vector3I footMinR = new(lowerMinR.X + (lowerW - footW) / 2, lowerMinR.Y - footH, lowerMinR.Z + (lowerD - footD) / 2);
         Vector3I footMaxR = new(footMinR.X + footW, lowerMinR.Y, footMinR.Z + footL);
 
+        AddAnkleFlare(grid, lowerMinL, lowerMaxL, footH);
+        AddAnkleFlare(grid, lowerMinR, lowerMaxR, footH);
         FillRoundedFoot(grid, footMinL, footMaxL);
         FillRoundedFoot(grid, footMinR, footMaxR);
     }
@@ -583,6 +597,7 @@ public partial class Main : Node
         Vector3I neckMin = new(centerX - neckW / 2, torsoMax.Y, centerZ - neckW / 2);
         Vector3I neckMax = new(neckMin.X + neckW, torsoMax.Y + neckH, neckMin.Z + neckW);
         FillLimb(grid, neckMin, neckMax, roundTop: false, taperEnd: 0.9f,
+            rootStart: 0f, rootEnd: 0f, rootAmount: 0f,
             kneeStart: 0f, kneeEnd: 0f, kneeAmount: 0f,
             calfStart: 0f, calfEnd: 0f, calfAmount: 0f);
 
@@ -651,6 +666,9 @@ public partial class Main : Node
         Vector3I max,
         bool roundTop,
         float taperEnd,
+        float rootStart,
+        float rootEnd,
+        float rootAmount,
         float kneeStart,
         float kneeEnd,
         float kneeAmount,
@@ -678,6 +696,12 @@ public partial class Main : Node
             {
                 float k = Smoothstep(0f, 0.2f, t);
                 scale = Lerp(0.7f, scale, k);
+            }
+
+            if (rootAmount > 0f && rootEnd > rootStart)
+            {
+                float root = Smoothstep(rootStart, rootEnd, t);
+                scale *= 1f + rootAmount * root;
             }
 
             if (kneeAmount > 0f && kneeEnd > kneeStart)
@@ -739,13 +763,18 @@ public partial class Main : Node
 
         float centerX = min.X + w * 0.5f;
         float centerZ = min.Z + d * 0.5f;
-        float rx = MathF.Max(1f, w * 0.5f);
-        float rz = MathF.Max(1f, d * 0.5f);
+        float baseRx = MathF.Max(1f, w * 0.5f);
+        float baseRz = MathF.Max(1f, d * 0.5f);
 
         for (int y = min.Y; y < max.Y; y++)
         {
             for (int z = min.Z; z < max.Z; z++)
             {
+                float tz = d <= 1 ? 0f : (float)(z - min.Z) / (d - 1);
+                float widthScale = Lerp(1f, 0.82f, Smoothstep(0.3f, 1f, tz));
+                float rx = MathF.Max(1f, baseRx * widthScale);
+                float rz = MathF.Max(1f, baseRz);
+
                 for (int x = min.X; x < max.X; x++)
                 {
                     float dx = (x + 0.5f - centerX) / rx;
@@ -757,6 +786,51 @@ public partial class Main : Node
                 }
             }
         }
+    }
+
+    private static void AddKneeCap(VoxelGrid grid, Vector3I upperMin, Vector3I upperMax, int forwardOffset)
+    {
+        int w = upperMax.X - upperMin.X;
+        int d = upperMax.Z - upperMin.Z;
+        int h = upperMax.Y - upperMin.Y;
+        if (w <= 0 || d <= 0 || h <= 0)
+        {
+            return;
+        }
+
+        int kneeY = upperMin.Y + Math.Max(1, (int)MathF.Round(h * 0.1f));
+        int centerX = (upperMin.X + upperMax.X) / 2;
+        int centerZ = (upperMin.Z + upperMax.Z) / 2 + forwardOffset;
+
+        int capW = Math.Max(2, w - 1);
+        int capD = Math.Max(2, d - 1);
+        int capH = 3;
+
+        Vector3I capMin = new(centerX - capW / 2, kneeY - capH / 2, centerZ - capD / 2);
+        Vector3I capMax = new(capMin.X + capW, kneeY + (capH + 1) / 2, capMin.Z + capD);
+        FillEllipsoid(grid, capMin, capMax);
+    }
+
+    private static void AddAnkleFlare(VoxelGrid grid, Vector3I lowerMin, Vector3I lowerMax, int footH)
+    {
+        int w = lowerMax.X - lowerMin.X;
+        int d = lowerMax.Z - lowerMin.Z;
+        if (w <= 0 || d <= 0)
+        {
+            return;
+        }
+
+        int ankleY = lowerMin.Y - Math.Max(1, footH / 2);
+        int centerX = (lowerMin.X + lowerMax.X) / 2;
+        int centerZ = (lowerMin.Z + lowerMax.Z) / 2;
+
+        int flareW = w + 2;
+        int flareD = d + 2;
+        int flareH = 2;
+
+        Vector3I flareMin = new(centerX - flareW / 2, ankleY - flareH / 2, centerZ - flareD / 2);
+        Vector3I flareMax = new(flareMin.X + flareW, ankleY + (flareH + 1) / 2, flareMin.Z + flareD);
+        FillEllipsoid(grid, flareMin, flareMax);
     }
 
     private static void FillRoundedHand(VoxelGrid grid, Vector3I min, Vector3I max)
