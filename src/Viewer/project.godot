@@ -1,0 +1,13 @@
+; Engine configuration file.
+; It's best to edit this file in the editor.
+
+config_version=5
+
+[application]
+config/name="VoxelViewer"
+run/main_scene="res://Scenes/ViewerMain.tscn"
+
+[display]
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/vsync/vsync_mode=1

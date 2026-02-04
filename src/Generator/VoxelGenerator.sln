@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxelGenerator", "VoxelGenerator.csproj", "{50EB8CF4-E64A-41F0-9B95-A08E4C97287B}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{50EB8CF4-E64A-41F0-9B95-A08E4C97287B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{50EB8CF4-E64A-41F0-9B95-A08E4C97287B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{50EB8CF4-E64A-41F0-9B95-A08E4C97287B}.Release|Any CPU.ActiveCfg = Debug|Any CPU
+		{50EB8CF4-E64A-41F0-9B95-A08E4C97287B}.Release|Any CPU.Build.0 = Debug|Any CPU
+	EndGlobalSection
+EndGlobal

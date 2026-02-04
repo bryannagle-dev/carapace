@@ -1,0 +1,17 @@
+# Godot / C# artifacts
+**/.godot/
+**/.mono/
+**/bin/
+**/obj/
+
+# Local downloads
+/tools/godot/
+
+# Generated outputs
+/output/
+/screenshots/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
