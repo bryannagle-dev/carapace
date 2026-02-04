@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Godot;
 using VoxelCore;
@@ -96,6 +97,7 @@ public partial class Main : Node
 
         VoxelGrid grid = new(sizeX, sizeY, sizeZ, new Vector3I(centerX, pelvisY, centerZ));
         FillTaperedTorso(grid, min, max);
+        SmoothTorsoCohesion(grid, min, max);
         CleanupFrontBellySpikes(grid, min, max);
         SmoothFrontProfile(grid, min, max);
         ClampChestFrontSpikes(grid, min, max);
@@ -200,6 +202,64 @@ public partial class Main : Node
                     }
                 }
             }
+        }
+    }
+
+    private static void SmoothTorsoCohesion(VoxelGrid grid, Vector3I min, Vector3I max)
+    {
+        int height = max.Y - min.Y;
+        if (height <= 0)
+        {
+            return;
+        }
+
+        int startY = min.Y + (int)MathF.Round(height * 0.2f);
+        int endY = min.Y + (int)MathF.Round(height * 0.85f);
+
+        List<Vector3I> fill = new();
+
+        for (int y = startY; y < endY; y++)
+        {
+            for (int x = min.X + 1; x < max.X - 1; x++)
+            {
+                for (int z = min.Z + 1; z < max.Z - 1; z++)
+                {
+                    if (grid.GetSafe(x, y, z) != 0)
+                    {
+                        continue;
+                    }
+
+                    bool left = grid.GetSafe(x - 1, y, z) != 0;
+                    bool right = grid.GetSafe(x + 1, y, z) != 0;
+                    bool back = grid.GetSafe(x, y, z - 1) != 0;
+                    bool front = grid.GetSafe(x, y, z + 1) != 0;
+
+                    int count = (left ? 1 : 0) + (right ? 1 : 0) + (back ? 1 : 0) + (front ? 1 : 0);
+                    if (count < 3)
+                    {
+                        continue;
+                    }
+
+                    if (!((left && right) || (front && back)))
+                    {
+                        continue;
+                    }
+
+                    bool up = grid.GetSafe(x, y + 1, z) != 0;
+                    bool down = grid.GetSafe(x, y - 1, z) != 0;
+                    if (!up && !down)
+                    {
+                        continue;
+                    }
+
+                    fill.Add(new Vector3I(x, y, z));
+                }
+            }
+        }
+
+        foreach (Vector3I cell in fill)
+        {
+            grid.Set(cell.X, cell.Y, cell.Z, 1);
         }
     }
 
@@ -508,11 +568,30 @@ public partial class Main : Node
         grid.FillBox(padMinL, padMaxL, 1);
         grid.FillBox(padMinR, padMaxR, 1);
 
+        int capW = Math.Max(armThickY + 2, shoulderPad + 3);
+        int capH = Math.Max(armThickY + 2, shoulderPadH + 2);
+        int capD = Math.Max(armThickZ + 2, shoulderPadD + 2);
+
+        Vector3I capMinL = new(torsoMin.X - capW + 1, shoulderY - capH / 2, centerZ - capD / 2);
+        Vector3I capMaxL = new(torsoMin.X + 1, shoulderY + (capH + 1) / 2, centerZ + (capD + 1) / 2);
+        Vector3I capMinR = new(torsoMax.X - 1, shoulderY - capH / 2, centerZ - capD / 2);
+        Vector3I capMaxR = new(torsoMax.X - 1 + capW, shoulderY + (capH + 1) / 2, centerZ + (capD + 1) / 2);
+
+        FillEllipsoid(grid, capMinL, capMaxL);
+        FillEllipsoid(grid, capMinR, capMaxR);
+
         Vector3I neckMin = new(centerX - neckW / 2, torsoMax.Y, centerZ - neckW / 2);
         Vector3I neckMax = new(neckMin.X + neckW, torsoMax.Y + neckH, neckMin.Z + neckW);
         FillLimb(grid, neckMin, neckMax, roundTop: false, taperEnd: 0.9f,
             kneeStart: 0f, kneeEnd: 0f, kneeAmount: 0f,
             calfStart: 0f, calfEnd: 0f, calfAmount: 0f);
+
+        int flareW = neckW + 2;
+        int flareD = neckW + 2;
+        int flareH = Math.Max(2, neckH / 2);
+        Vector3I flareMin = new(centerX - flareW / 2, torsoMax.Y + neckH - flareH, centerZ - flareD / 2);
+        Vector3I flareMax = new(flareMin.X + flareW, torsoMax.Y + neckH, flareMin.Z + flareD);
+        FillEllipsoid(grid, flareMin, flareMax);
 
         int upperLen = Math.Max(4, (int)MathF.Round(armLen * 0.55f));
         int lowerLen = Math.Max(4, armLen - upperLen);
@@ -525,19 +604,19 @@ public partial class Main : Node
         Vector3I upperRMin = new(torsoMax.X, armCenterY - armThickY / 2, armCenterZ - armThickZ / 2);
         Vector3I upperRMax = new(torsoMax.X + upperLen, armCenterY + (armThickY + 1) / 2, armCenterZ + (armThickZ + 1) / 2);
 
-        FillLimbAlongX(grid, upperLMin, upperLMax, roundStart: true, taperEnd: 0.9f);
-        FillLimbAlongX(grid, upperRMin, upperRMax, roundStart: true, taperEnd: 0.9f);
+        FillLimbAlongX(grid, upperLMin, upperLMax, roundStart: true, taperEnd: 0.93f);
+        FillLimbAlongX(grid, upperRMin, upperRMax, roundStart: true, taperEnd: 0.93f);
 
-        int lowerThickY = Math.Max(2, armThickY - 1);
-        int lowerThickZ = Math.Max(2, armThickZ - 1);
+        int lowerThickY = Math.Max(2, armThickY - 2);
+        int lowerThickZ = Math.Max(2, armThickZ - 2);
 
         Vector3I lowerLMin = new(upperLMin.X - lowerLen, armCenterY - lowerThickY / 2, armCenterZ - lowerThickZ / 2);
         Vector3I lowerLMax = new(upperLMin.X, armCenterY + (lowerThickY + 1) / 2, armCenterZ + (lowerThickZ + 1) / 2);
         Vector3I lowerRMin = new(upperRMax.X, armCenterY - lowerThickY / 2, armCenterZ - lowerThickZ / 2);
         Vector3I lowerRMax = new(upperRMax.X + lowerLen, armCenterY + (lowerThickY + 1) / 2, armCenterZ + (lowerThickZ + 1) / 2);
 
-        FillLimbAlongX(grid, lowerLMin, lowerLMax, roundStart: false, taperEnd: 0.85f);
-        FillLimbAlongX(grid, lowerRMin, lowerRMax, roundStart: false, taperEnd: 0.85f);
+        FillLimbAlongX(grid, lowerLMin, lowerLMax, roundStart: false, taperEnd: 0.75f);
+        FillLimbAlongX(grid, lowerRMin, lowerRMax, roundStart: false, taperEnd: 0.75f);
 
         int handLen = Math.Max(4, lowerLen / 3 + 1);
         int handThickY = Math.Min(lowerThickY + 1, lowerThickY + 2);
