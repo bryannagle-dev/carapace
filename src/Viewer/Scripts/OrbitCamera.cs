@@ -9,6 +9,7 @@ public partial class OrbitCamera : Node3D
     [Export] public float ZoomSpeed = 1.2f;
     [Export] public float MoveSpeed = 8.0f;
     [Export] public float VerticalSpeed = 6.0f;
+    [Export] public bool EnableMovement = true;
 
     private float _pitch;
     private float _yaw;
@@ -72,6 +73,11 @@ public partial class OrbitCamera : Node3D
 
     public override void _Process(double delta)
     {
+        if (!EnableMovement)
+        {
+            return;
+        }
+
         Vector3 forward = -GlobalBasis.Z;
         Vector3 right = GlobalBasis.X;
         forward.Y = 0;

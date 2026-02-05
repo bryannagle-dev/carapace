@@ -19,6 +19,17 @@ public partial class ViewerMain : Node3D
     private Label? _metadataLabel;
     private OrbitCamera? _cameraRig;
     private string _screenshotDir = string.Empty;
+    private MeshInstance3D? _meshTarget;
+    private VoxelGrid? _grid;
+    private byte[]? _palette;
+    private string _metadataJson = "{}";
+    private string _filePath = string.Empty;
+    private StaticBody3D? _pickBody;
+    private CollisionShape3D? _pickShape;
+    private MeshInstance3D? _selectionMesh;
+    private Vector3I _selectedVoxel;
+    private bool _hasSelection;
+    private bool _editMode;
 
     public override void _Ready()
     {
@@ -46,19 +57,22 @@ public partial class ViewerMain : Node3D
         VxmData data = VxmCodec.Load(filePath);
         GD.Print($"Loaded {filePath} ({data.Grid.SizeX}x{data.Grid.SizeY}x{data.Grid.SizeZ}).");
 
-        MeshInstance3D? target = GetMeshTarget();
-        if (target == null)
+        _filePath = filePath;
+        _grid = data.Grid;
+        _palette = data.PaletteRgba;
+        _metadataJson = data.MetadataJson;
+
+        _meshTarget = GetMeshTarget();
+        if (_meshTarget == null)
         {
             GD.Print("No MeshInstance3D target found.");
             return;
         }
 
-        ArrayMesh mesh = GreedyMesher.BuildMesh(data.Grid, data.PaletteRgba);
-        target.Mesh = mesh;
-        ApplyVertexColorMaterial(target);
-
-        UpdateDebugUi(data);
-        FocusCamera(data, target);
+        RebuildMesh();
+        EnsureSelectionMesh();
+        UpdateDebugUi();
+        FocusCamera(data, _meshTarget);
     }
 
     public override void _UnhandledInput(InputEvent @event)
@@ -66,6 +80,65 @@ public partial class ViewerMain : Node3D
         if (@event is InputEventKey keyEvent && keyEvent.Pressed && !keyEvent.Echo && keyEvent.Keycode == Key.F3)
         {
             _ = CaptureScreenshotAsync();
+        }
+
+        if (@event is InputEventKey saveEvent && saveEvent.Pressed && !saveEvent.Echo && saveEvent.Keycode == Key.F4)
+        {
+            SaveEdits();
+        }
+
+        if (@event is InputEventKey toggleEvent && toggleEvent.Pressed && !toggleEvent.Echo && toggleEvent.Keycode == Key.F2)
+        {
+            ToggleEditMode();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
+        if (@event is InputEventKey editKey && editKey.Pressed && !editKey.Echo)
+        {
+            if (_editMode && HandleEditHotkeys(editKey.Keycode))
+            {
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+        }
+
+        if (@event is InputEventMouseButton mouseButton && mouseButton.Pressed)
+        {
+            if (!_editMode)
+            {
+                return;
+            }
+
+            if (_grid == null || _meshTarget == null)
+            {
+                return;
+            }
+
+            bool shift = mouseButton.ShiftPressed;
+            if (shift && (mouseButton.ButtonIndex == MouseButton.Left || mouseButton.ButtonIndex == MouseButton.Right))
+            {
+                bool select = mouseButton.ButtonIndex == MouseButton.Left;
+                if (TryGetVoxelFromClick(select, out Vector3I voxel))
+                {
+                    if (_grid.InBounds(voxel.X, voxel.Y, voxel.Z))
+                    {
+                        if (select)
+                        {
+                            SetSelection(voxel);
+                        }
+                        else
+                        {
+                            if (_hasSelection && voxel == _selectedVoxel)
+                            {
+                                ClearSelection();
+                            }
+                        }
+                    }
+                }
+
+                GetViewport().SetInputAsHandled();
+            }
         }
     }
 
@@ -99,12 +172,25 @@ public partial class ViewerMain : Node3D
         return GetNodeOrNull<OrbitCamera>(fallbackPath);
     }
 
-    private void UpdateDebugUi(VxmData data)
+    private void UpdateDebugUi()
     {
-        int filled = CountFilled(data.Grid);
-        _dimsLabel?.SetText($"Dims: {data.Grid.SizeX} x {data.Grid.SizeY} x {data.Grid.SizeZ}");
+        if (_grid == null)
+        {
+            return;
+        }
+
+        int filled = CountFilled(_grid);
+        _dimsLabel?.SetText($"Dims: {_grid.SizeX} x {_grid.SizeY} x {_grid.SizeZ}");
         _voxelCountLabel?.SetText($"Filled Voxels: {filled}");
-        _metadataLabel?.SetText($"Metadata: {data.MetadataJson}");
+
+        string meta = _metadataJson;
+        if (_hasSelection)
+        {
+            meta += $"\nSelected: {_selectedVoxel.X}, {_selectedVoxel.Y}, {_selectedVoxel.Z}";
+        }
+        meta += $"\nEdit Mode: {(_editMode ? "ON" : "OFF")}";
+
+        _metadataLabel?.SetText($"Metadata: {meta}");
     }
 
     private static void ApplyVertexColorMaterial(MeshInstance3D target)
@@ -183,6 +269,279 @@ public partial class ViewerMain : Node3D
         Vector3 size = max - min;
         float radius = Mathf.Max(size.X, Mathf.Max(size.Y, size.Z)) * 0.5f;
         _cameraRig.Focus(center, radius);
+    }
+
+    private void RebuildMesh()
+    {
+        if (_grid == null || _palette == null || _meshTarget == null)
+        {
+            return;
+        }
+
+        ArrayMesh mesh = GreedyMesher.BuildMesh(_grid, _palette);
+        _meshTarget.Mesh = mesh;
+        ApplyVertexColorMaterial(_meshTarget);
+        UpdateCollision(mesh);
+    }
+
+    private void EnsureSelectionMesh()
+    {
+        if (_meshTarget == null || _selectionMesh != null)
+        {
+            return;
+        }
+
+        _selectionMesh = new MeshInstance3D
+        {
+            Name = "SelectionVoxel",
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            Visible = false,
+        };
+
+        BoxMesh box = new()
+        {
+            Size = Vector3.One * 1.02f,
+        };
+        _selectionMesh.Mesh = box;
+
+        StandardMaterial3D mat = new()
+        {
+            AlbedoColor = new Color(1f, 1f, 0f),
+            Metallic = 0f,
+            Roughness = 0.2f,
+            Transparency = BaseMaterial3D.TransparencyEnum.Disabled,
+        };
+        _selectionMesh.MaterialOverride = mat;
+
+        _meshTarget.AddChild(_selectionMesh);
+    }
+
+    private void SetSelection(Vector3I voxel)
+    {
+        _selectedVoxel = voxel;
+        _hasSelection = true;
+        if (_selectionMesh != null)
+        {
+            _selectionMesh.Visible = true;
+            _selectionMesh.Position = new Vector3(voxel.X + 0.5f, voxel.Y + 0.5f, voxel.Z + 0.5f);
+        }
+
+        if (_cameraRig != null)
+        {
+            _cameraRig.EnableMovement = false;
+        }
+
+        UpdateDebugUi();
+    }
+
+    private void ClearSelection()
+    {
+        _hasSelection = false;
+        if (_selectionMesh != null)
+        {
+            _selectionMesh.Visible = false;
+        }
+
+        if (_cameraRig != null)
+        {
+            _cameraRig.EnableMovement = true;
+        }
+
+        UpdateDebugUi();
+    }
+
+    private void ToggleEditMode()
+    {
+        _editMode = !_editMode;
+        if (!_editMode)
+        {
+            ClearSelection();
+        }
+        else
+        {
+            UpdateDebugUi();
+        }
+    }
+
+    private void UpdateCollision(ArrayMesh mesh)
+    {
+        if (_meshTarget == null)
+        {
+            return;
+        }
+
+        if (_pickBody == null)
+        {
+            _pickBody = new StaticBody3D
+            {
+                CollisionLayer = 1,
+                CollisionMask = 1,
+                Name = "PickBody",
+            };
+            _pickShape = new CollisionShape3D();
+            _pickBody.AddChild(_pickShape);
+            _meshTarget.AddChild(_pickBody);
+        }
+
+        if (_pickShape == null)
+        {
+            return;
+        }
+
+        if (mesh.GetSurfaceCount() == 0)
+        {
+            _pickShape.Shape = null;
+            return;
+        }
+
+        ConcavePolygonShape3D shape = new();
+        shape.Data = mesh.GetFaces();
+        _pickShape.Shape = shape;
+    }
+
+    private bool TryGetVoxelFromClick(bool selectMode, out Vector3I voxel)
+    {
+        voxel = default;
+
+        if (_meshTarget == null || _grid == null)
+        {
+            return false;
+        }
+
+        if (!TryRaycast(out Vector3 hitPos, out Vector3 hitNormal))
+        {
+            return false;
+        }
+
+        Vector3 localHit = _meshTarget.ToLocal(hitPos);
+        Vector3 localNormal = (_meshTarget.ToLocal(hitPos + hitNormal) - localHit).Normalized();
+        Vector3 offset = localNormal * 0.01f * (selectMode ? -1f : 1f);
+        Vector3 adjusted = localHit + offset;
+
+        int x = Mathf.FloorToInt(adjusted.X);
+        int y = Mathf.FloorToInt(adjusted.Y);
+        int z = Mathf.FloorToInt(adjusted.Z);
+
+        voxel = new Vector3I(x, y, z);
+        return _grid.InBounds(voxel.X, voxel.Y, voxel.Z);
+    }
+
+    private bool TryRaycast(out Vector3 hitPosition, out Vector3 hitNormal)
+    {
+        hitPosition = default;
+        hitNormal = default;
+
+        Camera3D? camera = _cameraRig?.GetNodeOrNull<Camera3D>("Camera3D") ?? GetViewport().GetCamera3D();
+        if (camera == null)
+        {
+            return false;
+        }
+
+        Vector2 mousePos = GetViewport().GetMousePosition();
+        Vector3 from = camera.ProjectRayOrigin(mousePos);
+        Vector3 dir = camera.ProjectRayNormal(mousePos);
+
+        PhysicsRayQueryParameters3D query = PhysicsRayQueryParameters3D.Create(from, from + dir * 1000f);
+        query.CollideWithAreas = false;
+        query.CollideWithBodies = true;
+        query.CollisionMask = 1;
+
+        var result = GetWorld3D().DirectSpaceState.IntersectRay(query);
+        if (result.Count == 0)
+        {
+            return false;
+        }
+
+        if (result.TryGetValue("position", out Variant positionValue) &&
+            result.TryGetValue("normal", out Variant normalValue))
+        {
+            hitPosition = positionValue.As<Vector3>();
+            hitNormal = normalValue.As<Vector3>();
+            return true;
+        }
+
+        return false;
+    }
+
+    private void SaveEdits()
+    {
+        if (_grid == null || _palette == null)
+        {
+            GD.PrintErr("No voxel data to save.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_filePath))
+        {
+            GD.PrintErr("No file path available to save.");
+            return;
+        }
+
+        try
+        {
+            VxmCodec.Save(_grid, _filePath, _palette, _metadataJson);
+            GD.Print($"Saved edits: {_filePath}");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"Failed to save edits: {ex.Message}");
+        }
+    }
+
+    private bool HandleEditHotkeys(Key keycode)
+    {
+        if (_grid == null)
+        {
+            return false;
+        }
+
+        if (!_editMode)
+        {
+            return false;
+        }
+
+        if (keycode == Key.Backspace || keycode == Key.Delete)
+        {
+            if (_hasSelection)
+            {
+                _grid.Set(_selectedVoxel.X, _selectedVoxel.Y, _selectedVoxel.Z, 0);
+                ClearSelection();
+                RebuildMesh();
+            }
+
+            return true;
+        }
+
+        if (!_hasSelection)
+        {
+            return false;
+        }
+
+        Vector3I delta = keycode switch
+        {
+            Key.W => new Vector3I(0, 0, 1),
+            Key.S => new Vector3I(0, 0, -1),
+            Key.A => new Vector3I(-1, 0, 0),
+            Key.D => new Vector3I(1, 0, 0),
+            Key.Q => new Vector3I(0, 1, 0),
+            Key.Z => new Vector3I(0, -1, 0),
+            _ => default,
+        };
+
+        if (delta == Vector3I.Zero)
+        {
+            return false;
+        }
+
+        Vector3I target = _selectedVoxel + delta;
+        if (_grid.InBounds(target.X, target.Y, target.Z))
+        {
+            _grid.Set(target.X, target.Y, target.Z, 1);
+            RebuildMesh();
+            SetSelection(target);
+        }
+
+        return true;
     }
 
     private static bool TryComputeBounds(VoxelGrid grid, out Vector3 min, out Vector3 max)

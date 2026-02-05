@@ -50,6 +50,8 @@ public partial class Main : Node
         torsoVoxels = Math.Max(64, torsoVoxels);
 
         (int torsoH, int torsoW, int torsoD) = ComputeTorsoDims(torsoVoxels);
+        int torsoTrimBack = 2;
+        torsoD = Math.Max(4, torsoD - 2);
 
         int margin = 4;
 
@@ -94,6 +96,7 @@ public partial class Main : Node
             pelvisY + hipH,
             RoundToInt(centerZf - torsoD * 0.5f));
         Vector3I max = new(min.X + torsoW, min.Y + torsoH, min.Z + torsoD);
+        min = new Vector3I(min.X, min.Y, min.Z + torsoTrimBack);
 
         VoxelGrid grid = new(sizeX, sizeY, sizeZ, new Vector3I(centerX, pelvisY, centerZ));
         FillTaperedTorso(grid, min, max);
@@ -102,7 +105,6 @@ public partial class Main : Node
         SmoothFrontProfile(grid, min, max);
         ClampChestFrontSpikes(grid, min, max);
         AddHipsAndLegs(grid, min, max, pelvisY, hipH, hipW, hipD, legGap, legW, legD, upperLegH, lowerLegH, footH, footL);
-        CleanupLowerLegRearOverhang(grid);
         AddShouldersNeckArms(grid, min, max, armLen, armThickY, armThickZ, shoulderPad, neckH, neckW);
         AddHead(grid, min, max, centerXf, centerZf, neckH, headH, headW, headD);
         MirrorXUnion(grid);
@@ -530,6 +532,10 @@ public partial class Main : Node
             rootStart: 0.7f, rootEnd: 1.0f, rootAmount: 0.18f,
             kneeStart: 0.7f, kneeEnd: 0.95f, kneeAmount: 0.12f,
             calfStart: 0f, calfEnd: 0f, calfAmount: 0f);
+        TrimUpperLegBack(grid, upperMinL, upperMaxL, trim: 1);
+        TrimUpperLegBack(grid, upperMinR, upperMaxR, trim: 1);
+        AddGluteBulge(grid, upperMinL, upperMaxL);
+        AddGluteBulge(grid, upperMinR, upperMaxR);
 
         int lowerW = Math.Max(3, upperW - 2);
         int lowerD = Math.Max(3, upperD - 2);
@@ -572,6 +578,13 @@ public partial class Main : Node
 
         FillRoundedFoot(grid, footMinL, footMaxL);
         FillRoundedFoot(grid, footMinR, footMaxR);
+
+        int footMinZActualL = FindFilledMinZ(grid, footMinL, footMaxL, footH);
+        int footMinZActualR = FindFilledMinZ(grid, footMinR, footMaxR, footH);
+        ClampLowerLegRearToFoot(grid, lowerMinL, lowerMaxL, footMinZActualL);
+        ClampLowerLegRearToFoot(grid, lowerMinR, lowerMaxR, footMinZActualR);
+        TrimUpperLegRearToFoot(grid, upperMinL, upperMaxL, footMinZActualL, layers: 2);
+        TrimUpperLegRearToFoot(grid, upperMinR, upperMaxR, footMinZActualR, layers: 2);
     }
 
     private static void AddShouldersNeckArms(VoxelGrid grid, Vector3I torsoMin, Vector3I torsoMax, int armLen, int armThickY, int armThickZ, int shoulderPad, int neckH, int neckW)
@@ -665,7 +678,7 @@ public partial class Main : Node
         Vector3I headMin = new(
             RoundToInt(centerXf - headW * 0.5f),
             headMinY,
-            RoundToInt(centerZf - headD * 0.5f));
+            RoundToInt(centerZf - headD * 0.5f) + 2);
         Vector3I headMax = new(headMin.X + headW, headMaxY, headMin.Z + headD);
 
         FillEllipsoid(grid, headMin, headMax);
@@ -816,6 +829,63 @@ public partial class Main : Node
         FillEllipsoid(grid, capMin, capMax);
     }
 
+    private static void TrimUpperLegBack(VoxelGrid grid, Vector3I upperMin, Vector3I upperMax, int trim)
+    {
+        if (trim <= 0)
+        {
+            return;
+        }
+
+        int z0 = upperMin.Z;
+        int z1 = Math.Min(upperMax.Z, upperMin.Z + trim);
+
+        for (int y = upperMin.Y; y < upperMax.Y; y++)
+        {
+            for (int z = z0; z < z1; z++)
+            {
+                for (int x = upperMin.X; x < upperMax.X; x++)
+                {
+                    grid.Set(x, y, z, 0);
+                }
+            }
+        }
+    }
+
+    private static void AddGluteBulge(VoxelGrid grid, Vector3I upperMin, Vector3I upperMax)
+    {
+        int w = upperMax.X - upperMin.X;
+        int d = upperMax.Z - upperMin.Z;
+        int h = upperMax.Y - upperMin.Y;
+        if (w <= 1 || d <= 1 || h <= 1)
+        {
+            return;
+        }
+
+        int gluteW = Math.Max(2, w - 3);
+        int gluteH = Math.Max(2, h / 4) + 2;
+        int gluteD = Math.Max(2, d / 3 - 1);
+
+        int centerX = (upperMin.X + upperMax.X) / 2;
+        int topY = upperMax.Y + 2;
+
+        int minX = centerX - gluteW / 2;
+        int maxX = minX + gluteW;
+        int minY = topY - gluteH;
+        int maxY = topY;
+
+        int minZ = upperMin.Z - gluteD + 2;
+        int maxZ = upperMin.Z + 2;
+
+        FillEllipsoid(grid, new Vector3I(minX, minY, minZ), new Vector3I(maxX, maxY, maxZ));
+
+        // Clamp glute bulge so it doesn't extend too far behind the upper leg back edge.
+        int rearCut = upperMin.Z - 1;
+        if (minZ < rearCut)
+        {
+            grid.CarveBox(new Vector3I(minX, minY, minZ), new Vector3I(maxX, maxY, rearCut));
+        }
+    }
+
     private static void PinchAnkle(VoxelGrid grid, Vector3I lowerMin, Vector3I lowerMax, int layers, int inset)
     {
         int w = lowerMax.X - lowerMin.X;
@@ -883,118 +953,66 @@ public partial class Main : Node
         }
     }
 
-    private static void CleanupLowerLegRearOverhang(VoxelGrid grid)
+    private static void ClampLowerLegRearToFoot(VoxelGrid grid, Vector3I lowerMin, Vector3I lowerMax, int footMinZ)
     {
-        int minY = -1;
-        for (int y = 0; y < grid.SizeY; y++)
-        {
-            for (int z = 0; z < grid.SizeZ; z++)
-            {
-                for (int x = 0; x < grid.SizeX; x++)
-                {
-                    if (grid.GetSafe(x, y, z) != 0)
-                    {
-                        minY = y;
-                        goto FoundMinY;
-                    }
-                }
-            }
-        }
-
-    FoundMinY:
-        if (minY < 0)
+        int h = lowerMax.Y - lowerMin.Y;
+        if (h <= 0)
         {
             return;
         }
 
-        int footY0 = minY;
-        int footY1 = Math.Min(grid.SizeY - 1, minY + 1);
-
-        List<int> footXs = new();
-        List<(int x, int z)> footCoords = new();
-
-        for (int y = footY0; y <= footY1; y++)
+        int zCut = Math.Clamp(footMinZ, lowerMin.Z, lowerMax.Z);
+        int zStart = Math.Max(0, lowerMin.Z - 2);
+        for (int y = lowerMin.Y; y < lowerMax.Y; y++)
         {
-            for (int z = 0; z < grid.SizeZ; z++)
+            for (int z = zStart; z < zCut; z++)
             {
-                for (int x = 0; x < grid.SizeX; x++)
+                for (int x = lowerMin.X; x < lowerMax.X; x++)
                 {
-                    if (grid.GetSafe(x, y, z) == 0)
-                    {
-                        continue;
-                    }
-
-                    footXs.Add(x);
-                    footCoords.Add((x, z));
+                    grid.Set(x, y, z, 0);
                 }
             }
-        }
-
-        if (footXs.Count == 0)
-        {
-            return;
-        }
-
-        footXs.Sort();
-        int splitIndex = -1;
-        int maxGap = 0;
-        for (int i = 0; i < footXs.Count - 1; i++)
-        {
-            int gap = footXs[i + 1] - footXs[i];
-            if (gap > maxGap)
-            {
-                maxGap = gap;
-                splitIndex = i;
-            }
-        }
-
-        float splitX = splitIndex >= 0 ? (footXs[splitIndex] + footXs[splitIndex + 1]) * 0.5f : footXs[0];
-
-        (int minX, int maxX, int minZ) left = (int.MaxValue, int.MinValue, int.MaxValue);
-        (int minX, int maxX, int minZ) right = (int.MaxValue, int.MinValue, int.MaxValue);
-
-        foreach ((int x, int z) in footCoords)
-        {
-            if (x < splitX)
-            {
-                if (x < left.minX) left.minX = x;
-                if (x > left.maxX) left.maxX = x;
-                if (z < left.minZ) left.minZ = z;
-            }
-            else
-            {
-                if (x < right.minX) right.minX = x;
-                if (x > right.maxX) right.maxX = x;
-                if (z < right.minZ) right.minZ = z;
-            }
-        }
-
-        int legY0 = Math.Min(grid.SizeY - 1, minY + 2);
-        int legY1 = Math.Min(grid.SizeY - 1, minY + 4);
-
-        if (left.minX <= left.maxX)
-        {
-            CarveRearOverhangBand(grid, left.minX, left.maxX, left.minZ, legY0, legY1);
-        }
-
-        if (right.minX <= right.maxX)
-        {
-            CarveRearOverhangBand(grid, right.minX, right.maxX, right.minZ, legY0, legY1);
         }
     }
 
-    private static void CarveRearOverhangBand(VoxelGrid grid, int minX, int maxX, int minZ, int y0, int y1)
+    private static int FindFilledMinZ(VoxelGrid grid, Vector3I min, Vector3I max, int yLayers)
     {
-        if (minZ <= 0)
+        int minZ = max.Z;
+        int y1 = Math.Min(max.Y, min.Y + Math.Max(1, yLayers));
+
+        for (int z = min.Z; z < max.Z; z++)
+        {
+            for (int y = min.Y; y < y1; y++)
+            {
+                for (int x = min.X; x < max.X; x++)
+                {
+                    if (grid.GetSafe(x, y, z) != 0)
+                    {
+                        return z;
+                    }
+                }
+            }
+        }
+
+        return minZ;
+    }
+
+    private static void TrimUpperLegRearToFoot(VoxelGrid grid, Vector3I upperMin, Vector3I upperMax, int footMinZ, int layers)
+    {
+        int h = upperMax.Y - upperMin.Y;
+        if (h <= 0)
         {
             return;
         }
 
-        for (int y = y0; y <= y1; y++)
+        int y1 = Math.Min(upperMax.Y, upperMin.Y + Math.Max(1, layers));
+        int zCut = Math.Clamp(footMinZ, upperMin.Z, upperMax.Z);
+
+        for (int y = upperMin.Y; y < y1; y++)
         {
-            for (int z = 0; z < minZ; z++)
+            for (int z = upperMin.Z; z < zCut; z++)
             {
-                for (int x = minX; x <= maxX; x++)
+                for (int x = upperMin.X; x < upperMax.X; x++)
                 {
                     grid.Set(x, y, z, 0);
                 }
