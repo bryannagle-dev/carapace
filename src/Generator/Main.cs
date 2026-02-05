@@ -34,6 +34,7 @@ public partial class Main : Node
         string style = GetArgValue(args, "--style") ?? "chunky";
 
         VoxelGrid grid = BuildTorsoOnly(height, torsoVoxels, seed);
+        ApplyEditsIfPresent(grid, outPath);
         string metadataJson = $"{{\"seed\":{seed},\"height_vox\":{height},\"torso_voxels\":{torsoVoxels},\"style\":\"{style}\"}}";
 
         string outputDir = Path.GetDirectoryName(outPath) ?? ".";
@@ -43,6 +44,15 @@ public partial class Main : Node
 
         GD.Print($"Saved {outPath} with {grid.VoxelCount} voxels.");
         GetTree().Quit();
+    }
+
+    private static void ApplyEditsIfPresent(VoxelGrid grid, string outPath)
+    {
+        if (VoxelEdits.TryLoad(outPath, out VoxelEdits edits) && !edits.IsEmpty)
+        {
+            edits.Apply(grid);
+            GD.Print($"Applied edits: +{edits.Added.Count} / -{edits.Removed.Count}");
+        }
     }
 
     private static VoxelGrid BuildTorsoOnly(int height, int torsoVoxels, int seed)

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using Godot;
@@ -22,14 +23,19 @@ public partial class ViewerMain : Node3D
     private MeshInstance3D? _meshTarget;
     private VoxelGrid? _grid;
     private byte[]? _palette;
+    private byte[]? _baseVoxels;
     private string _metadataJson = "{}";
     private string _filePath = string.Empty;
     private StaticBody3D? _pickBody;
     private CollisionShape3D? _pickShape;
-    private MeshInstance3D? _selectionMesh;
-    private Vector3I _selectedVoxel;
-    private bool _hasSelection;
+    private MultiMeshInstance3D? _selectionMesh;
+    private MeshInstance3D? _cursorMesh;
+    private readonly HashSet<Vector3I> _selectedVoxels = new();
+    private Vector3I _activeVoxel;
+    private bool _hasActiveVoxel;
     private bool _editMode;
+    private readonly Stack<List<VoxelChange>> _undoStack = new();
+    private readonly Stack<List<VoxelChange>> _redoStack = new();
 
     public override void _Ready()
     {
@@ -61,6 +67,7 @@ public partial class ViewerMain : Node3D
         _grid = data.Grid;
         _palette = data.PaletteRgba;
         _metadataJson = data.MetadataJson;
+        _baseVoxels = (byte[])data.Grid.Voxels.Clone();
 
         _meshTarget = GetMeshTarget();
         if (_meshTarget == null)
@@ -71,32 +78,45 @@ public partial class ViewerMain : Node3D
 
         RebuildMesh();
         EnsureSelectionMesh();
+        EnsureCursorMesh();
         UpdateDebugUi();
         FocusCamera(data, _meshTarget);
     }
 
-    public override void _UnhandledInput(InputEvent @event)
+    public override void _Process(double delta)
     {
-        if (@event is InputEventKey keyEvent && keyEvent.Pressed && !keyEvent.Echo && keyEvent.Keycode == Key.F3)
+        if (!_editMode)
         {
-            _ = CaptureScreenshotAsync();
-        }
-
-        if (@event is InputEventKey saveEvent && saveEvent.Pressed && !saveEvent.Echo && saveEvent.Keycode == Key.F4)
-        {
-            SaveEdits();
-        }
-
-        if (@event is InputEventKey toggleEvent && toggleEvent.Pressed && !toggleEvent.Echo && toggleEvent.Keycode == Key.F2)
-        {
-            ToggleEditMode();
-            GetViewport().SetInputAsHandled();
             return;
         }
 
-        if (@event is InputEventKey editKey && editKey.Pressed && !editKey.Echo)
+        UpdateCursorFromMouse();
+    }
+
+    public override void _UnhandledInput(InputEvent @event)
+    {
+        if (@event is InputEventKey keyEvent && keyEvent.Pressed && !keyEvent.Echo)
         {
-            if (_editMode && HandleEditHotkeys(editKey.Keycode))
+            if (keyEvent.Keycode == Key.F3)
+            {
+                _ = CaptureScreenshotAsync();
+                return;
+            }
+
+            if (keyEvent.Keycode == Key.F4)
+            {
+                SaveEdits();
+                return;
+            }
+
+            if (keyEvent.Keycode == Key.F2)
+            {
+                ToggleEditMode();
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+
+            if (_editMode && HandleEditHotkeys(keyEvent))
             {
                 GetViewport().SetInputAsHandled();
                 return;
@@ -110,31 +130,30 @@ public partial class ViewerMain : Node3D
                 return;
             }
 
-            if (_grid == null || _meshTarget == null)
+            if (_grid == null)
             {
                 return;
             }
 
-            bool shift = mouseButton.ShiftPressed;
-            if (shift && (mouseButton.ButtonIndex == MouseButton.Left || mouseButton.ButtonIndex == MouseButton.Right))
+            if (!mouseButton.ShiftPressed)
             {
-                bool select = mouseButton.ButtonIndex == MouseButton.Left;
-                if (TryGetVoxelFromClick(select, out Vector3I voxel))
+                return;
+            }
+
+            if (mouseButton.ButtonIndex != MouseButton.Left && mouseButton.ButtonIndex != MouseButton.Right)
+            {
+                return;
+            }
+
+            if (TryGetVoxelFromClick(true, out Vector3I voxel) && _grid.GetSafe(voxel.X, voxel.Y, voxel.Z) != 0)
+            {
+                if (mouseButton.ButtonIndex == MouseButton.Left)
                 {
-                    if (_grid.InBounds(voxel.X, voxel.Y, voxel.Z))
-                    {
-                        if (select)
-                        {
-                            SetSelection(voxel);
-                        }
-                        else
-                        {
-                            if (_hasSelection && voxel == _selectedVoxel)
-                            {
-                                ClearSelection();
-                            }
-                        }
-                    }
+                    AddToSelection(voxel);
+                }
+                else
+                {
+                    RemoveFromSelection(voxel);
                 }
 
                 GetViewport().SetInputAsHandled();
@@ -184,10 +203,16 @@ public partial class ViewerMain : Node3D
         _voxelCountLabel?.SetText($"Filled Voxels: {filled}");
 
         string meta = _metadataJson;
-        if (_hasSelection)
+        if (_selectedVoxels.Count > 0)
         {
-            meta += $"\nSelected: {_selectedVoxel.X}, {_selectedVoxel.Y}, {_selectedVoxel.Z}";
+            meta += $"\nSelected: {_selectedVoxels.Count}";
         }
+
+        if (_hasActiveVoxel)
+        {
+            meta += $"\nActive: {_activeVoxel.X}, {_activeVoxel.Y}, {_activeVoxel.Z}";
+        }
+
         meta += $"\nEdit Mode: {(_editMode ? "ON" : "OFF")}";
 
         _metadataLabel?.SetText($"Metadata: {meta}");
@@ -291,9 +316,9 @@ public partial class ViewerMain : Node3D
             return;
         }
 
-        _selectionMesh = new MeshInstance3D
+        _selectionMesh = new MultiMeshInstance3D
         {
-            Name = "SelectionVoxel",
+            Name = "SelectionVoxels",
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
             Visible = false,
         };
@@ -302,7 +327,15 @@ public partial class ViewerMain : Node3D
         {
             Size = Vector3.One * 1.02f,
         };
-        _selectionMesh.Mesh = box;
+
+        MultiMesh multi = new()
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            Mesh = box,
+            InstanceCount = 0,
+        };
+
+        _selectionMesh.Multimesh = multi;
 
         StandardMaterial3D mat = new()
         {
@@ -316,51 +349,163 @@ public partial class ViewerMain : Node3D
         _meshTarget.AddChild(_selectionMesh);
     }
 
-    private void SetSelection(Vector3I voxel)
+    private void EnsureCursorMesh()
     {
-        _selectedVoxel = voxel;
-        _hasSelection = true;
-        if (_selectionMesh != null)
+        if (_meshTarget == null || _cursorMesh != null)
         {
-            _selectionMesh.Visible = true;
-            _selectionMesh.Position = new Vector3(voxel.X + 0.5f, voxel.Y + 0.5f, voxel.Z + 0.5f);
+            return;
         }
 
-        if (_cameraRig != null)
+        _cursorMesh = new MeshInstance3D
         {
-            _cameraRig.EnableMovement = false;
+            Name = "CursorVoxel",
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            Visible = false,
+        };
+
+        BoxMesh box = new()
+        {
+            Size = Vector3.One * 1.04f,
+        };
+        _cursorMesh.Mesh = box;
+
+        StandardMaterial3D mat = new()
+        {
+            AlbedoColor = new Color(0.3f, 1f, 0.3f, 0.35f),
+            Metallic = 0f,
+            Roughness = 0.3f,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+        };
+        _cursorMesh.MaterialOverride = mat;
+
+        _meshTarget.AddChild(_cursorMesh);
+    }
+
+    private void UpdateSelectionMesh()
+    {
+        if (_selectionMesh == null || _selectionMesh.Multimesh == null)
+        {
+            return;
         }
 
+        int count = _selectedVoxels.Count;
+        if (count == 0)
+        {
+            _selectionMesh.Visible = false;
+            _selectionMesh.Multimesh.InstanceCount = 0;
+            return;
+        }
+
+        _selectionMesh.Visible = true;
+        _selectionMesh.Multimesh.InstanceCount = count;
+
+        int index = 0;
+        foreach (Vector3I voxel in _selectedVoxels)
+        {
+            Transform3D transform = new(Basis.Identity, new Vector3(voxel.X + 0.5f, voxel.Y + 0.5f, voxel.Z + 0.5f));
+            _selectionMesh.Multimesh.SetInstanceTransform(index++, transform);
+        }
+    }
+
+    private void UpdateCursorFromMouse()
+    {
+        if (_cursorMesh == null || _grid == null)
+        {
+            return;
+        }
+
+        if (TryGetVoxelFromClick(true, out Vector3I voxel))
+        {
+            _cursorMesh.Visible = true;
+            _cursorMesh.Position = new Vector3(voxel.X + 0.5f, voxel.Y + 0.5f, voxel.Z + 0.5f);
+        }
+        else
+        {
+            _cursorMesh.Visible = false;
+        }
+    }
+
+    private void SetActiveVoxel(Vector3I voxel)
+    {
+        _activeVoxel = voxel;
+        _hasActiveVoxel = true;
+    }
+
+    private void AddToSelection(Vector3I voxel)
+    {
+        if (_selectedVoxels.Add(voxel))
+        {
+            UpdateSelectionMesh();
+        }
+
+        SetActiveVoxel(voxel);
         UpdateDebugUi();
+    }
+
+    private void RemoveFromSelection(Vector3I voxel)
+    {
+        if (_selectedVoxels.Remove(voxel))
+        {
+            if (_hasActiveVoxel && voxel == _activeVoxel)
+            {
+                if (TryGetAnySelected(out Vector3I next))
+                {
+                    SetActiveVoxel(next);
+                }
+                else
+                {
+                    _hasActiveVoxel = false;
+                }
+            }
+
+            UpdateSelectionMesh();
+            UpdateDebugUi();
+        }
     }
 
     private void ClearSelection()
     {
-        _hasSelection = false;
-        if (_selectionMesh != null)
-        {
-            _selectionMesh.Visible = false;
-        }
-
-        if (_cameraRig != null)
-        {
-            _cameraRig.EnableMovement = true;
-        }
-
+        _selectedVoxels.Clear();
+        _hasActiveVoxel = false;
+        UpdateSelectionMesh();
         UpdateDebugUi();
+    }
+
+    private bool TryGetAnySelected(out Vector3I voxel)
+    {
+        foreach (Vector3I item in _selectedVoxels)
+        {
+            voxel = item;
+            return true;
+        }
+
+        voxel = default;
+        return false;
     }
 
     private void ToggleEditMode()
     {
-        _editMode = !_editMode;
-        if (!_editMode)
+        SetEditMode(!_editMode);
+    }
+
+    private void SetEditMode(bool enabled)
+    {
+        _editMode = enabled;
+        if (_cameraRig != null)
+        {
+            _cameraRig.EnableMovement = !enabled;
+        }
+
+        if (!enabled)
         {
             ClearSelection();
+            if (_cursorMesh != null)
+            {
+                _cursorMesh.Visible = false;
+            }
         }
-        else
-        {
-            UpdateDebugUi();
-        }
+
+        UpdateDebugUi();
     }
 
     private void UpdateCollision(ArrayMesh mesh)
@@ -480,7 +625,22 @@ public partial class ViewerMain : Node3D
         try
         {
             VxmCodec.Save(_grid, _filePath, _palette, _metadataJson);
-            GD.Print($"Saved edits: {_filePath}");
+            VoxelEdits edits = BuildEdits();
+            string editsPath = VoxelEdits.GetEditsPath(_filePath);
+
+            if (edits.IsEmpty)
+            {
+                if (File.Exists(editsPath))
+                {
+                    File.Delete(editsPath);
+                }
+            }
+            else
+            {
+                VoxelEdits.Save(_filePath, edits);
+            }
+
+            GD.Print($"Saved edits: {_filePath} (+{edits.Added.Count} / -{edits.Removed.Count})");
         }
         catch (Exception ex)
         {
@@ -488,36 +648,83 @@ public partial class ViewerMain : Node3D
         }
     }
 
-    private bool HandleEditHotkeys(Key keycode)
+    private VoxelEdits BuildEdits()
+    {
+        VoxelEdits edits = new();
+
+        if (_grid == null || _baseVoxels == null)
+        {
+            return edits;
+        }
+
+        if (_baseVoxels.Length != _grid.Voxels.Length)
+        {
+            return edits;
+        }
+
+        int sizeX = _grid.SizeX;
+        int sizeY = _grid.SizeY;
+        int sizeZ = _grid.SizeZ;
+
+        int index = 0;
+        for (int z = 0; z < sizeZ; z++)
+        {
+            for (int y = 0; y < sizeY; y++)
+            {
+                for (int x = 0; x < sizeX; x++, index++)
+                {
+                    byte before = _baseVoxels[index];
+                    byte after = _grid.Voxels[index];
+
+                    if (before == 0 && after != 0)
+                    {
+                        edits.Added.Add(new VoxelCoord(x, y, z));
+                    }
+                    else if (before != 0 && after == 0)
+                    {
+                        edits.Removed.Add(new VoxelCoord(x, y, z));
+                    }
+                }
+            }
+        }
+
+        return edits;
+    }
+
+    private bool HandleEditHotkeys(InputEventKey keyEvent)
     {
         if (_grid == null)
         {
             return false;
         }
 
-        if (!_editMode)
+        if (keyEvent.CtrlPressed)
         {
-            return false;
-        }
-
-        if (keycode == Key.Backspace || keycode == Key.Delete)
-        {
-            if (_hasSelection)
+            if (keyEvent.Keycode == Key.Z)
             {
-                _grid.Set(_selectedVoxel.X, _selectedVoxel.Y, _selectedVoxel.Z, 0);
-                ClearSelection();
-                RebuildMesh();
+                UndoLast();
+                return true;
             }
 
+            if (keyEvent.Keycode == Key.Y)
+            {
+                RedoLast();
+                return true;
+            }
+        }
+
+        if (keyEvent.Keycode == Key.Backspace || keyEvent.Keycode == Key.Delete)
+        {
+            RemoveSelectedVoxels();
             return true;
         }
 
-        if (!_hasSelection)
+        if (!_hasActiveVoxel)
         {
             return false;
         }
 
-        Vector3I delta = keycode switch
+        Vector3I delta = keyEvent.Keycode switch
         {
             Key.W => new Vector3I(0, 0, 1),
             Key.S => new Vector3I(0, 0, -1),
@@ -533,15 +740,107 @@ public partial class ViewerMain : Node3D
             return false;
         }
 
-        Vector3I target = _selectedVoxel + delta;
+        Vector3I target = _activeVoxel + delta;
         if (_grid.InBounds(target.X, target.Y, target.Z))
         {
-            _grid.Set(target.X, target.Y, target.Z, 1);
-            RebuildMesh();
-            SetSelection(target);
+            if (_grid.GetSafe(target.X, target.Y, target.Z) == 0)
+            {
+                List<VoxelChange> changes = new()
+                {
+                    new VoxelChange(target, 0, 1),
+                };
+
+                ApplyChanges(changes, applyAfter: true);
+                PushUndo(changes);
+                AddToSelection(target);
+                RebuildMesh();
+            }
         }
 
         return true;
+    }
+
+    private void RemoveSelectedVoxels()
+    {
+        if (_grid == null)
+        {
+            return;
+        }
+
+        if (_selectedVoxels.Count == 0)
+        {
+            return;
+        }
+
+        List<VoxelChange> changes = new();
+        foreach (Vector3I voxel in _selectedVoxels)
+        {
+            byte current = _grid.GetSafe(voxel.X, voxel.Y, voxel.Z);
+            if (current == 0)
+            {
+                continue;
+            }
+
+            changes.Add(new VoxelChange(voxel, current, 0));
+        }
+
+        if (changes.Count == 0)
+        {
+            return;
+        }
+
+        ApplyChanges(changes, applyAfter: true);
+        PushUndo(changes);
+        ClearSelection();
+        RebuildMesh();
+    }
+
+    private void PushUndo(List<VoxelChange> changes)
+    {
+        _undoStack.Push(changes);
+        _redoStack.Clear();
+    }
+
+    private void UndoLast()
+    {
+        if (_grid == null || _undoStack.Count == 0)
+        {
+            return;
+        }
+
+        List<VoxelChange> changes = _undoStack.Pop();
+        ApplyChanges(changes, applyAfter: false);
+        _redoStack.Push(changes);
+        ClearSelection();
+        RebuildMesh();
+    }
+
+    private void RedoLast()
+    {
+        if (_grid == null || _redoStack.Count == 0)
+        {
+            return;
+        }
+
+        List<VoxelChange> changes = _redoStack.Pop();
+        ApplyChanges(changes, applyAfter: true);
+        _undoStack.Push(changes);
+        ClearSelection();
+        RebuildMesh();
+    }
+
+    private void ApplyChanges(List<VoxelChange> changes, bool applyAfter)
+    {
+        if (_grid == null)
+        {
+            return;
+        }
+
+        foreach (VoxelChange change in changes)
+        {
+            byte value = applyAfter ? change.After : change.Before;
+            _grid.Set(change.Position.X, change.Position.Y, change.Position.Z, value);
+        }
     }
 
     private static bool TryComputeBounds(VoxelGrid grid, out Vector3 min, out Vector3 max)
@@ -589,5 +888,19 @@ public partial class ViewerMain : Node3D
         }
 
         return null;
+    }
+
+    private readonly struct VoxelChange
+    {
+        public Vector3I Position { get; }
+        public byte Before { get; }
+        public byte After { get; }
+
+        public VoxelChange(Vector3I position, byte before, byte after)
+        {
+            Position = position;
+            Before = before;
+            After = after;
+        }
     }
 }
