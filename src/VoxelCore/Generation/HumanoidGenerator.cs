@@ -1,111 +1,58 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using Godot;
-using VoxelCore;
-using VoxelCore.IO;
 
-public partial class Main : Node
+namespace VoxelCore.Generation;
+
+public static class HumanoidGenerator
 {
-    public override void _Ready()
+    public static VoxelGrid BuildTable(int width, int depth, int height, int legThickness, int topThickness)
     {
-        string[] args = OS.GetCmdlineUserArgs();
+        width = Math.Max(4, width);
+        depth = Math.Max(4, depth);
+        height = Math.Max(4, height);
+        legThickness = Math.Max(1, legThickness);
+        topThickness = Math.Max(1, topThickness);
 
-        if (HasFlag(args, "--help") || HasFlag(args, "-h"))
-        {
-            PrintUsage();
-            GetTree().Quit();
-            return;
-        }
+        int sizeX = width + 4;
+        int sizeZ = depth + 4;
+        int sizeY = height + topThickness + 4;
 
-        string? inPath = GetArgValue(args, "--in");
-        string? seedText = GetArgValue(args, "--seed");
-        string? outPath = GetArgValue(args, "--out");
+        int centerX = sizeX / 2;
+        int centerZ = sizeZ / 2;
+        int topY = sizeY - topThickness - 2;
 
-        if (!string.IsNullOrWhiteSpace(inPath))
-        {
-            if (string.IsNullOrWhiteSpace(outPath))
-            {
-                PrintUsage();
-                GetTree().Quit(1);
-                return;
-            }
+        VoxelGrid grid = new(sizeX, sizeY, sizeZ, new Vector3I(centerX, topY, centerZ));
 
-            ConvertVoxelFile(inPath, outPath);
-            GetTree().Quit();
-            return;
-        }
+        int minX = centerX - width / 2;
+        int maxX = minX + width;
+        int minZ = centerZ - depth / 2;
+        int maxZ = minZ + depth;
 
-        if (string.IsNullOrWhiteSpace(seedText) || string.IsNullOrWhiteSpace(outPath))
-        {
-            PrintUsage();
-            GetTree().Quit(1);
-            return;
-        }
+        // Tabletop
+        grid.FillBox(new Vector3I(minX, topY, minZ), new Vector3I(maxX, topY + topThickness, maxZ), 1);
 
-        int seed = int.Parse(seedText);
-        int height = ParseIntOrDefault(GetArgValue(args, "--height"), 64);
-        int torsoVoxels = ParseIntOrDefault(GetArgValue(args, "--torso_voxels"), 800);
-        string style = GetArgValue(args, "--style") ?? "chunky";
+        // Legs
+        int legY0 = 2;
+        int legY1 = topY;
+        int lx0 = minX;
+        int lx1 = minX + legThickness;
+        int rx0 = maxX - legThickness;
+        int rx1 = maxX;
+        int fz0 = minZ;
+        int fz1 = minZ + legThickness;
+        int bz0 = maxZ - legThickness;
+        int bz1 = maxZ;
 
-        VoxelGrid grid = VoxelCore.Generation.HumanoidGenerator.BuildHumanoid(height, torsoVoxels, seed);
-        ApplyEditsIfPresent(grid, outPath);
-        string metadataJson = $"{{\"seed\":{seed},\"height_vox\":{height},\"torso_voxels\":{torsoVoxels},\"style\":\"{style}\"}}";
+        grid.FillBox(new Vector3I(lx0, legY0, fz0), new Vector3I(lx1, legY1, fz1), 1);
+        grid.FillBox(new Vector3I(rx0, legY0, fz0), new Vector3I(rx1, legY1, fz1), 1);
+        grid.FillBox(new Vector3I(lx0, legY0, bz0), new Vector3I(lx1, legY1, bz1), 1);
+        grid.FillBox(new Vector3I(rx0, legY0, bz0), new Vector3I(rx1, legY1, bz1), 1);
 
-        string outputDir = Path.GetDirectoryName(outPath) ?? ".";
-        Directory.CreateDirectory(outputDir);
-
-        SaveVoxelOutput(grid, outPath, metadataJson);
-
-        GD.Print($"Saved {outPath} with {grid.VoxelCount} voxels.");
-        GetTree().Quit();
+        return grid;
     }
 
-    private static void ApplyEditsIfPresent(VoxelGrid grid, string outPath)
-    {
-        if (VoxelEdits.TryLoad(outPath, out VoxelEdits edits) && !edits.IsEmpty)
-        {
-            edits.Apply(grid);
-            GD.Print($"Applied edits: +{edits.Added.Count} / -{edits.Removed.Count}");
-        }
-    }
-
-    private static void ConvertVoxelFile(string inPath, string outPath)
-    {
-        VxmData data = LoadVoxelData(inPath);
-        ApplyEditsIfPresent(data.Grid, inPath);
-        SaveVoxelOutput(data.Grid, outPath, data.MetadataJson, data.PaletteRgba);
-        GD.Print($"Converted {inPath} -> {outPath}");
-    }
-
-    private static VxmData LoadVoxelData(string path)
-    {
-        if (IsVoxFile(path))
-        {
-            return VoxCodecOptional.Load(path);
-        }
-
-        return VxmCodec.Load(path);
-    }
-
-    private static void SaveVoxelOutput(VoxelGrid grid, string path, string metadataJson, byte[]? palette = null)
-    {
-        if (IsVoxFile(path))
-        {
-            VoxCodecOptional.Save(grid, path, palette);
-        }
-        else
-        {
-            VxmCodec.Save(grid, path, paletteRgba: palette, metadataJson: metadataJson);
-        }
-    }
-
-    private static bool IsVoxFile(string path)
-    {
-        return string.Equals(Path.GetExtension(path), ".vox", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static VoxelGrid BuildTorsoOnly(int height, int torsoVoxels, int seed)
+    public static VoxelGrid BuildHumanoid(int height, int torsoVoxels, int seed)
     {
         torsoVoxels = Math.Max(64, torsoVoxels);
 
@@ -1273,42 +1220,5 @@ public partial class Main : Node
         grid.CarveBox(
             new Vector3I(rightX + inset, socketY0, legZ + inset),
             new Vector3I(rightX + legW - inset, socketY1, legZ + legD - inset));
-    }
-
-    private static bool HasFlag(string[] args, string flag)
-    {
-        for (int i = 0; i < args.Length; i++)
-        {
-            if (string.Equals(args[i], flag, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static string? GetArgValue(string[] args, string name)
-    {
-        for (int i = 0; i < args.Length - 1; i++)
-        {
-            if (string.Equals(args[i], name, StringComparison.OrdinalIgnoreCase))
-            {
-                return args[i + 1];
-            }
-        }
-
-        return null;
-    }
-
-    private static int ParseIntOrDefault(string? text, int fallback)
-    {
-        return int.TryParse(text, out int value) ? value : fallback;
-    }
-
-    private static void PrintUsage()
-    {
-        GD.Print("Usage: --seed <int> --out <path> [--height <int>] [--torso_voxels <int>] [--style chunky|slender]");
-        GD.Print("   or: --in <path> --out <path>   (convert between .vxm and .vox)");
     }
 }

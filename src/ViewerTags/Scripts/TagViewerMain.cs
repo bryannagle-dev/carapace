@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Godot;
 using VoxelCore;
+using VoxelCore.Generation;
 using VoxelCore.IO;
 using VoxelCore.Meshing;
 
@@ -14,17 +15,23 @@ public partial class TagViewerMain : Node3D
     private const int MenuImportVox = 2;
     private const int MenuSaveVxm = 3;
     private const int MenuExportVox = 4;
+    private const int MenuGenerateHumanoid = 10;
+    private const int MenuGenerateTable = 11;
 
     private Label? _fileLabel;
     private Label? _selectionLabel;
     private Label? _tagsLabel;
+    private Label? _generateTitle;
     private LineEdit? _tagName;
     private OptionButton? _direction;
+    private MenuButton? _generateMenu;
     private Button? _applyTag;
     private Button? _removeTag;
     private Button? _clearSelection;
     private FileDialog? _openDialog;
     private FileDialog? _saveDialog;
+    private AcceptDialog? _generateDialog;
+    private GridContainer? _paramsGrid;
     private MeshInstance3D? _meshTarget;
     private OrbitCamera? _cameraRig;
     private StaticBody3D? _pickBody;
@@ -38,6 +45,8 @@ public partial class TagViewerMain : Node3D
 
     private readonly HashSet<Vector3I> _selectedVoxels = new();
     private readonly Dictionary<string, TagGroupRuntime> _tags = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, LineEdit> _paramInputs = new(StringComparer.OrdinalIgnoreCase);
+    private GenerateKind _pendingGenerate = GenerateKind.None;
 
     private PendingDialog _pendingDialog = PendingDialog.None;
 
@@ -46,17 +55,22 @@ public partial class TagViewerMain : Node3D
         _fileLabel = GetNodeOrNull<Label>("CanvasLayer/UIRoot/TopBar/LabelFile");
         _selectionLabel = GetNodeOrNull<Label>("CanvasLayer/UIRoot/TagPanel/TagVBox/LabelSelection");
         _tagsLabel = GetNodeOrNull<Label>("CanvasLayer/UIRoot/TagPanel/TagVBox/LabelTags");
+        _generateTitle = GetNodeOrNull<Label>("CanvasLayer/UIRoot/GenerateDialog/GenerateVBox/GenerateTitle");
         _tagName = GetNodeOrNull<LineEdit>("CanvasLayer/UIRoot/TagPanel/TagVBox/TagName");
         _direction = GetNodeOrNull<OptionButton>("CanvasLayer/UIRoot/TagPanel/TagVBox/Direction");
+        _generateMenu = GetNodeOrNull<MenuButton>("CanvasLayer/UIRoot/TopBar/GenerateMenu");
         _applyTag = GetNodeOrNull<Button>("CanvasLayer/UIRoot/TagPanel/TagVBox/ApplyTag");
         _removeTag = GetNodeOrNull<Button>("CanvasLayer/UIRoot/TagPanel/TagVBox/RemoveTag");
         _clearSelection = GetNodeOrNull<Button>("CanvasLayer/UIRoot/TagPanel/TagVBox/ClearSelection");
         _openDialog = GetNodeOrNull<FileDialog>("CanvasLayer/UIRoot/OpenDialog");
         _saveDialog = GetNodeOrNull<FileDialog>("CanvasLayer/UIRoot/SaveDialog");
+        _generateDialog = GetNodeOrNull<AcceptDialog>("CanvasLayer/UIRoot/GenerateDialog");
+        _paramsGrid = GetNodeOrNull<GridContainer>("CanvasLayer/UIRoot/GenerateDialog/GenerateVBox/ParamsGrid");
         _meshTarget = GetNodeOrNull<MeshInstance3D>("MeshInstance3D");
         _cameraRig = GetNodeOrNull<OrbitCamera>("CameraRig");
 
         ConfigureFileMenu();
+        ConfigureGenerateMenu();
         ConfigureDirectionOptions();
         HookUiSignals();
         EnsureSelectionMesh();
@@ -103,6 +117,20 @@ public partial class TagViewerMain : Node3D
         popup.IdPressed += OnFileMenuPressed;
     }
 
+    private void ConfigureGenerateMenu()
+    {
+        if (_generateMenu == null)
+        {
+            return;
+        }
+
+        PopupMenu popup = _generateMenu.GetPopup();
+        popup.Clear();
+        popup.AddItem("Humanoid", MenuGenerateHumanoid);
+        popup.AddItem("Table", MenuGenerateTable);
+        popup.IdPressed += OnGenerateMenuPressed;
+    }
+
     private void ConfigureDirectionOptions()
     {
         if (_direction == null)
@@ -144,6 +172,11 @@ public partial class TagViewerMain : Node3D
         {
             _saveDialog.FileSelected += OnSaveFileSelected;
         }
+
+        if (_generateDialog != null)
+        {
+            _generateDialog.Confirmed += OnGenerateConfirmed;
+        }
     }
 
     private void OnFileMenuPressed(long id)
@@ -161,6 +194,19 @@ public partial class TagViewerMain : Node3D
                 break;
             case MenuExportVox:
                 OpenSaveDialogFor(PendingDialog.ExportVox, "*.vox");
+                break;
+        }
+    }
+
+    private void OnGenerateMenuPressed(long id)
+    {
+        switch (id)
+        {
+            case MenuGenerateHumanoid:
+                ShowGenerateDialog(GenerateKind.Humanoid);
+                break;
+            case MenuGenerateTable:
+                ShowGenerateDialog(GenerateKind.Table);
                 break;
         }
     }
@@ -217,6 +263,26 @@ public partial class TagViewerMain : Node3D
         }
 
         _pendingDialog = PendingDialog.None;
+    }
+
+    private void OnGenerateConfirmed()
+    {
+        if (_grid == null && _pendingGenerate == GenerateKind.None)
+        {
+            return;
+        }
+
+        switch (_pendingGenerate)
+        {
+            case GenerateKind.Humanoid:
+                GenerateHumanoid();
+                break;
+            case GenerateKind.Table:
+                GenerateTable();
+                break;
+        }
+
+        _pendingGenerate = GenerateKind.None;
     }
 
     private void LoadFile(string path)
@@ -283,6 +349,108 @@ public partial class TagViewerMain : Node3D
 
         string exportPath = EnsureExtension(path, ".vox");
         VoxCodecOptional.Save(_grid, exportPath, _palette);
+    }
+
+    private void ShowGenerateDialog(GenerateKind kind)
+    {
+        if (_generateDialog == null || _paramsGrid == null)
+        {
+            return;
+        }
+
+        _pendingGenerate = kind;
+        _paramInputs.Clear();
+
+        foreach (Node child in _paramsGrid.GetChildren())
+        {
+            child.QueueFree();
+        }
+
+        _generateTitle?.SetText(kind == GenerateKind.Humanoid ? "Humanoid Parameters" : "Table Parameters");
+        _generateDialog.OkButtonText = "Run";
+
+        IEnumerable<GenerateParam> parameters = kind switch
+        {
+            GenerateKind.Humanoid => new[]
+            {
+                new GenerateParam("seed", "123"),
+                new GenerateParam("height", "48"),
+                new GenerateParam("torso_voxels", "1000"),
+            },
+            GenerateKind.Table => new[]
+            {
+                new GenerateParam("width", "16"),
+                new GenerateParam("depth", "10"),
+                new GenerateParam("height", "10"),
+                new GenerateParam("leg_thickness", "2"),
+                new GenerateParam("top_thickness", "2"),
+            },
+            _ => Array.Empty<GenerateParam>(),
+        };
+
+        foreach (GenerateParam param in parameters)
+        {
+            Label label = new() { Text = param.Name };
+            LineEdit input = new() { Text = param.DefaultValue };
+            _paramsGrid.AddChild(label);
+            _paramsGrid.AddChild(input);
+            _paramInputs[param.Name] = input;
+        }
+
+        _generateDialog.PopupCenteredRatio(0.4f);
+    }
+
+    private void GenerateHumanoid()
+    {
+        int seed = ReadParamInt("seed", 123);
+        int height = ReadParamInt("height", 48);
+        int torsoVoxels = ReadParamInt("torso_voxels", 1000);
+
+        VoxelGrid grid = HumanoidGenerator.BuildHumanoid(height, torsoVoxels, seed);
+        byte[] palette = BuildDefaultPalette();
+        string metadata = $"{{\"generator\":\"humanoid\",\"seed\":{seed},\"height_vox\":{height},\"torso_voxels\":{torsoVoxels}}}";
+
+        UseGeneratedGrid(grid, palette, metadata);
+    }
+
+    private void GenerateTable()
+    {
+        int width = ReadParamInt("width", 16);
+        int depth = ReadParamInt("depth", 10);
+        int height = ReadParamInt("height", 10);
+        int legThickness = ReadParamInt("leg_thickness", 2);
+        int topThickness = ReadParamInt("top_thickness", 2);
+
+        VoxelGrid grid = HumanoidGenerator.BuildTable(width, depth, height, legThickness, topThickness);
+        byte[] palette = BuildDefaultPalette();
+        string metadata = $"{{\"generator\":\"table\",\"width\":{width},\"depth\":{depth},\"height\":{height}}}";
+
+        UseGeneratedGrid(grid, palette, metadata);
+    }
+
+    private int ReadParamInt(string key, int fallback)
+    {
+        if (!_paramInputs.TryGetValue(key, out LineEdit? input) || input == null)
+        {
+            return fallback;
+        }
+
+        return int.TryParse(input.Text, out int value) ? value : fallback;
+    }
+
+    private void UseGeneratedGrid(VoxelGrid grid, byte[] palette, string metadata)
+    {
+        _grid = grid;
+        _palette = palette;
+        _metadataJson = metadata;
+        _currentPath = string.Empty;
+        _selectedVoxels.Clear();
+        _tags.Clear();
+        UpdateSelectionMesh();
+
+        RebuildMesh();
+        FocusCamera();
+        UpdateUi();
     }
 
     private void FocusCamera()
@@ -619,7 +787,14 @@ public partial class TagViewerMain : Node3D
 
         if (_fileLabel != null)
         {
-            _fileLabel.Text = string.IsNullOrWhiteSpace(_currentPath) ? "No file loaded" : Path.GetFileName(_currentPath);
+            if (string.IsNullOrWhiteSpace(_currentPath))
+            {
+                _fileLabel.Text = _grid == null ? "No file loaded" : "Generated (unsaved)";
+            }
+            else
+            {
+                _fileLabel.Text = Path.GetFileName(_currentPath);
+            }
         }
     }
 
@@ -772,6 +947,31 @@ public partial class TagViewerMain : Node3D
         return path + ext;
     }
 
+    private static byte[] BuildDefaultPalette()
+    {
+        byte[] palette = new byte[256 * 4];
+        for (int i = 0; i < 256; i++)
+        {
+            int offset = i * 4;
+            if (i == 0)
+            {
+                palette[offset] = 0;
+                palette[offset + 1] = 0;
+                palette[offset + 2] = 0;
+                palette[offset + 3] = 0;
+            }
+            else
+            {
+                palette[offset] = 230;
+                palette[offset + 1] = 230;
+                palette[offset + 2] = 230;
+                palette[offset + 3] = 255;
+            }
+        }
+
+        return palette;
+    }
+
     private sealed class TagGroupRuntime
     {
         public string Name { get; }
@@ -790,6 +990,15 @@ public partial class TagViewerMain : Node3D
         public string? Name { get; set; }
         public string? Direction { get; set; }
         public List<VoxelCoord>? Voxels { get; set; }
+    }
+
+    private readonly record struct GenerateParam(string Name, string DefaultValue);
+
+    private enum GenerateKind
+    {
+        None,
+        Humanoid,
+        Table,
     }
 
     private enum PendingDialog

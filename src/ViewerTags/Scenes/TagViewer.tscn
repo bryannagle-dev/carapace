@@ -40,6 +40,9 @@ offset_bottom = 44.0
 [node name="FileMenu" type="MenuButton" parent="CanvasLayer/UIRoot/TopBar"]
 text = "File"
 
+[node name="GenerateMenu" type="MenuButton" parent="CanvasLayer/UIRoot/TopBar"]
+text = "Generate"
+
 [node name="LabelFile" type="Label" parent="CanvasLayer/UIRoot/TopBar"]
 text = "No file loaded"
 size_flags_horizontal = 3
@@ -86,3 +89,18 @@ file_mode = 0
 [node name="SaveDialog" type="FileDialog" parent="CanvasLayer/UIRoot"]
 access = 2
 file_mode = 4
+
+[node name="GenerateDialog" type="AcceptDialog" parent="CanvasLayer/UIRoot"]
+title = "Generate Model"
+
+[node name="GenerateVBox" type="VBoxContainer" parent="CanvasLayer/UIRoot/GenerateDialog"]
+offset_left = 12.0
+offset_top = 12.0
+offset_right = 520.0
+offset_bottom = 320.0
+
+[node name="GenerateTitle" type="Label" parent="CanvasLayer/UIRoot/GenerateDialog/GenerateVBox"]
+text = "Parameters"
+
+[node name="ParamsGrid" type="GridContainer" parent="CanvasLayer/UIRoot/GenerateDialog/GenerateVBox"]
+columns = 2
