@@ -18,8 +18,23 @@ public partial class Main : Node
             return;
         }
 
+        string? inPath = GetArgValue(args, "--in");
         string? seedText = GetArgValue(args, "--seed");
         string? outPath = GetArgValue(args, "--out");
+
+        if (!string.IsNullOrWhiteSpace(inPath))
+        {
+            if (string.IsNullOrWhiteSpace(outPath))
+            {
+                PrintUsage();
+                GetTree().Quit(1);
+                return;
+            }
+
+            ConvertVoxelFile(inPath, outPath);
+            GetTree().Quit();
+            return;
+        }
 
         if (string.IsNullOrWhiteSpace(seedText) || string.IsNullOrWhiteSpace(outPath))
         {
@@ -40,7 +55,7 @@ public partial class Main : Node
         string outputDir = Path.GetDirectoryName(outPath) ?? ".";
         Directory.CreateDirectory(outputDir);
 
-        VxmCodec.Save(grid, outPath, metadataJson: metadataJson);
+        SaveVoxelOutput(grid, outPath, metadataJson);
 
         GD.Print($"Saved {outPath} with {grid.VoxelCount} voxels.");
         GetTree().Quit();
@@ -53,6 +68,41 @@ public partial class Main : Node
             edits.Apply(grid);
             GD.Print($"Applied edits: +{edits.Added.Count} / -{edits.Removed.Count}");
         }
+    }
+
+    private static void ConvertVoxelFile(string inPath, string outPath)
+    {
+        VxmData data = LoadVoxelData(inPath);
+        ApplyEditsIfPresent(data.Grid, inPath);
+        SaveVoxelOutput(data.Grid, outPath, data.MetadataJson, data.PaletteRgba);
+        GD.Print($"Converted {inPath} -> {outPath}");
+    }
+
+    private static VxmData LoadVoxelData(string path)
+    {
+        if (IsVoxFile(path))
+        {
+            return VoxCodecOptional.Load(path);
+        }
+
+        return VxmCodec.Load(path);
+    }
+
+    private static void SaveVoxelOutput(VoxelGrid grid, string path, string metadataJson, byte[]? palette = null)
+    {
+        if (IsVoxFile(path))
+        {
+            VoxCodecOptional.Save(grid, path, palette);
+        }
+        else
+        {
+            VxmCodec.Save(grid, path, paletteRgba: palette, metadataJson: metadataJson);
+        }
+    }
+
+    private static bool IsVoxFile(string path)
+    {
+        return string.Equals(Path.GetExtension(path), ".vox", StringComparison.OrdinalIgnoreCase);
     }
 
     private static VoxelGrid BuildTorsoOnly(int height, int torsoVoxels, int seed)
@@ -1259,5 +1309,6 @@ public partial class Main : Node
     private static void PrintUsage()
     {
         GD.Print("Usage: --seed <int> --out <path> [--height <int>] [--torso_voxels <int>] [--style chunky|slender]");
+        GD.Print("   or: --in <path> --out <path>   (convert between .vxm and .vox)");
     }
 }

@@ -60,7 +60,7 @@ public partial class ViewerMain : Node3D
             return;
         }
 
-        VxmData data = VxmCodec.Load(filePath);
+        VxmData data = LoadVoxelData(filePath);
         GD.Print($"Loaded {filePath} ({data.Grid.SizeX}x{data.Grid.SizeY}x{data.Grid.SizeZ}).");
 
         _filePath = filePath;
@@ -624,7 +624,14 @@ public partial class ViewerMain : Node3D
 
         try
         {
-            VxmCodec.Save(_grid, _filePath, _palette, _metadataJson);
+            if (IsVoxFile(_filePath))
+            {
+                VoxCodecOptional.Save(_grid, _filePath, _palette);
+            }
+            else
+            {
+                VxmCodec.Save(_grid, _filePath, _palette, _metadataJson);
+            }
             VoxelEdits edits = BuildEdits();
             string editsPath = VoxelEdits.GetEditsPath(_filePath);
 
@@ -888,6 +895,21 @@ public partial class ViewerMain : Node3D
         }
 
         return null;
+    }
+
+    private static VxmData LoadVoxelData(string path)
+    {
+        if (IsVoxFile(path))
+        {
+            return VoxCodecOptional.Load(path);
+        }
+
+        return VxmCodec.Load(path);
+    }
+
+    private static bool IsVoxFile(string path)
+    {
+        return string.Equals(Path.GetExtension(path), ".vox", StringComparison.OrdinalIgnoreCase);
     }
 
     private readonly struct VoxelChange

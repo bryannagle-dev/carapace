@@ -81,3 +81,29 @@ Suggested metadata fields:
   "style": "chunky"
 }
 ```
+
+### Tag Metadata (ViewerTags)
+
+The tag viewer stores semantic voxel tags in the metadata JSON under a `tags` array.
+Each tag includes:
+
+- `name`: string tag identifier
+- `direction`: string direction (`up`, `down`, `left`, `right`)
+- `voxels`: list of voxel coordinates
+
+Example:
+
+```json
+{
+  "tags": [
+    {
+      "name": "pivot",
+      "direction": "up",
+      "voxels": [
+        { "x": 10, "y": 12, "z": 8 },
+        { "x": 11, "y": 12, "z": 8 }
+      ]
+    }
+  ]
+}
+```
