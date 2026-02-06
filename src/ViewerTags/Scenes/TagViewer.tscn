@@ -102,5 +102,17 @@ offset_bottom = 320.0
 [node name="GenerateTitle" type="Label" parent="CanvasLayer/UIRoot/GenerateDialog/GenerateVBox"]
 text = "Parameters"
 
+[node name="MultiplierRow" type="HBoxContainer" parent="CanvasLayer/UIRoot/GenerateDialog/GenerateVBox"]
+
+[node name="LabelMultiplier" type="Label" parent="CanvasLayer/UIRoot/GenerateDialog/GenerateVBox/MultiplierRow"]
+text = "Multiplier"
+
+[node name="MultiplierValue" type="LineEdit" parent="CanvasLayer/UIRoot/GenerateDialog/GenerateVBox/MultiplierRow"]
+text = "1"
+size_flags_horizontal = 3
+
+[node name="ApplyMultiplier" type="Button" parent="CanvasLayer/UIRoot/GenerateDialog/GenerateVBox/MultiplierRow"]
+text = "Apply"
+
 [node name="ParamsGrid" type="GridContainer" parent="CanvasLayer/UIRoot/GenerateDialog/GenerateVBox"]
 columns = 2

@@ -18,6 +18,7 @@ public partial class TagViewerMain : Node3D
     private const int MenuGenerateHumanoid = 10;
     private const int MenuGenerateTable = 11;
     private const int MenuGenerateWallTorch = 12;
+    private const int MenuGenerateTreasureChest = 13;
 
     private Label? _fileLabel;
     private Label? _selectionLabel;
@@ -29,6 +30,8 @@ public partial class TagViewerMain : Node3D
     private Button? _applyTag;
     private Button? _removeTag;
     private Button? _clearSelection;
+    private LineEdit? _multiplierInput;
+    private Button? _applyMultiplier;
     private FileDialog? _openDialog;
     private FileDialog? _saveDialog;
     private AcceptDialog? _generateDialog;
@@ -63,6 +66,8 @@ public partial class TagViewerMain : Node3D
         _applyTag = GetNodeOrNull<Button>("CanvasLayer/UIRoot/TagPanel/TagVBox/ApplyTag");
         _removeTag = GetNodeOrNull<Button>("CanvasLayer/UIRoot/TagPanel/TagVBox/RemoveTag");
         _clearSelection = GetNodeOrNull<Button>("CanvasLayer/UIRoot/TagPanel/TagVBox/ClearSelection");
+        _multiplierInput = GetNodeOrNull<LineEdit>("CanvasLayer/UIRoot/GenerateDialog/GenerateVBox/MultiplierRow/MultiplierValue");
+        _applyMultiplier = GetNodeOrNull<Button>("CanvasLayer/UIRoot/GenerateDialog/GenerateVBox/MultiplierRow/ApplyMultiplier");
         _openDialog = GetNodeOrNull<FileDialog>("CanvasLayer/UIRoot/OpenDialog");
         _saveDialog = GetNodeOrNull<FileDialog>("CanvasLayer/UIRoot/SaveDialog");
         _generateDialog = GetNodeOrNull<AcceptDialog>("CanvasLayer/UIRoot/GenerateDialog");
@@ -130,6 +135,7 @@ public partial class TagViewerMain : Node3D
         popup.AddItem("Humanoid", MenuGenerateHumanoid);
         popup.AddItem("Table", MenuGenerateTable);
         popup.AddItem("Wall Torch", MenuGenerateWallTorch);
+        popup.AddItem("Treasure Chest", MenuGenerateTreasureChest);
         popup.IdPressed += OnGenerateMenuPressed;
     }
 
@@ -179,6 +185,11 @@ public partial class TagViewerMain : Node3D
         {
             _generateDialog.Confirmed += OnGenerateConfirmed;
         }
+
+        if (_applyMultiplier != null)
+        {
+            _applyMultiplier.Pressed += ApplyMultiplier;
+        }
     }
 
     private void OnFileMenuPressed(long id)
@@ -212,6 +223,9 @@ public partial class TagViewerMain : Node3D
                 break;
             case MenuGenerateWallTorch:
                 ShowGenerateDialog(GenerateKind.WallTorch);
+                break;
+            case MenuGenerateTreasureChest:
+                ShowGenerateDialog(GenerateKind.TreasureChest);
                 break;
         }
     }
@@ -287,6 +301,9 @@ public partial class TagViewerMain : Node3D
                 break;
             case GenerateKind.WallTorch:
                 GenerateWallTorch();
+                break;
+            case GenerateKind.TreasureChest:
+                GenerateTreasureChest();
                 break;
         }
 
@@ -379,6 +396,7 @@ public partial class TagViewerMain : Node3D
             GenerateKind.Humanoid => "Humanoid Parameters",
             GenerateKind.Table => "Table Parameters",
             GenerateKind.WallTorch => "Wall Torch Parameters",
+            GenerateKind.TreasureChest => "Treasure Chest Parameters",
             _ => "Parameters",
         });
         _generateDialog.OkButtonText = "Run";
@@ -408,6 +426,18 @@ public partial class TagViewerMain : Node3D
                 new GenerateParam("torch_radius", "2"),
                 new GenerateParam("torch_length", "4"),
                 new GenerateParam("flame_height", "4"),
+                new GenerateParam("handle_enabled", "1"),
+                new GenerateParam("handle_length", "4"),
+                new GenerateParam("handle_radius", "1"),
+            },
+            GenerateKind.TreasureChest => new[]
+            {
+                new GenerateParam("width", "12"),
+                new GenerateParam("depth", "8"),
+                new GenerateParam("height", "6"),
+                new GenerateParam("lid_height", "4"),
+                new GenerateParam("wall_thickness", "1"),
+                new GenerateParam("band_thickness", "1"),
             },
             _ => Array.Empty<GenerateParam>(),
         };
@@ -461,10 +491,39 @@ public partial class TagViewerMain : Node3D
         int torchRadius = ReadParamInt("torch_radius", 2);
         int torchLength = ReadParamInt("torch_length", 4);
         int flameHeight = ReadParamInt("flame_height", 4);
+        int handleEnabled = ReadParamInt("handle_enabled", 1);
+        int handleLength = ReadParamInt("handle_length", 4);
+        int handleRadius = ReadParamInt("handle_radius", 1);
 
-        VoxelGrid grid = HumanoidGenerator.BuildWallTorch(plateWidth, plateHeight, plateThickness, bracketLength, torchRadius, torchLength, flameHeight);
+        VoxelGrid grid = HumanoidGenerator.BuildWallTorch(
+            plateWidth,
+            plateHeight,
+            plateThickness,
+            bracketLength,
+            torchRadius,
+            torchLength,
+            flameHeight,
+            handleEnabled != 0,
+            handleLength,
+            handleRadius);
         byte[] palette = BuildDefaultPalette();
         string metadata = $"{{\"generator\":\"wall_torch\",\"plate_width\":{plateWidth},\"plate_height\":{plateHeight},\"bracket_length\":{bracketLength}}}";
+
+        UseGeneratedGrid(grid, palette, metadata);
+    }
+
+    private void GenerateTreasureChest()
+    {
+        int width = ReadParamInt("width", 12);
+        int depth = ReadParamInt("depth", 8);
+        int height = ReadParamInt("height", 6);
+        int lidHeight = ReadParamInt("lid_height", 4);
+        int wallThickness = ReadParamInt("wall_thickness", 1);
+        int bandThickness = ReadParamInt("band_thickness", 1);
+
+        VoxelGrid grid = HumanoidGenerator.BuildTreasureChest(width, depth, height, lidHeight, wallThickness, bandThickness);
+        byte[] palette = BuildDefaultPalette();
+        string metadata = $"{{\"generator\":\"treasure_chest\",\"width\":{width},\"depth\":{depth},\"height\":{height}}}";
 
         UseGeneratedGrid(grid, palette, metadata);
     }
@@ -492,6 +551,45 @@ public partial class TagViewerMain : Node3D
         RebuildMesh();
         FocusCamera();
         UpdateUi();
+    }
+
+    private void ApplyMultiplier()
+    {
+        if (_multiplierInput == null)
+        {
+            return;
+        }
+
+        if (!float.TryParse(_multiplierInput.Text, out float factor))
+        {
+            return;
+        }
+
+        if (Math.Abs(factor) < 0.001f)
+        {
+            return;
+        }
+
+        foreach ((string key, LineEdit input) in _paramInputs)
+        {
+            if (key.Equals("seed", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (key.EndsWith("_enabled", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!float.TryParse(input.Text, out float value))
+            {
+                continue;
+            }
+
+            int scaled = (int)MathF.Round(value * factor);
+            input.Text = scaled.ToString();
+        }
     }
 
     private void FocusCamera()
@@ -1041,6 +1139,7 @@ public partial class TagViewerMain : Node3D
         Humanoid,
         Table,
         WallTorch,
+        TreasureChest,
     }
 
     private enum PendingDialog

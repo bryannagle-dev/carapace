@@ -6,7 +6,17 @@ namespace VoxelCore.Generation;
 
 public static class HumanoidGenerator
 {
-    public static VoxelGrid BuildWallTorch(int plateWidth, int plateHeight, int plateThickness, int bracketLength, int torchRadius, int torchLength, int flameHeight)
+    public static VoxelGrid BuildWallTorch(
+        int plateWidth,
+        int plateHeight,
+        int plateThickness,
+        int bracketLength,
+        int torchRadius,
+        int torchLength,
+        int flameHeight,
+        bool includeHandle,
+        int handleLength,
+        int handleRadius)
     {
         plateWidth = Math.Max(3, plateWidth);
         plateHeight = Math.Max(4, plateHeight);
@@ -15,14 +25,17 @@ public static class HumanoidGenerator
         torchRadius = Math.Max(1, torchRadius);
         torchLength = Math.Max(3, torchLength);
         flameHeight = Math.Max(2, flameHeight);
+        handleLength = Math.Max(2, handleLength);
+        handleRadius = Math.Max(1, handleRadius);
 
         int margin = 3;
+        int extraLower = includeHandle ? handleLength : 0;
         int sizeX = plateWidth + margin * 2;
-        int sizeY = plateHeight + flameHeight + margin * 2;
+        int sizeY = plateHeight + flameHeight + margin * 2 + extraLower;
         int sizeZ = plateThickness + bracketLength + torchLength + margin * 2;
 
         int centerX = sizeX / 2;
-        int baseY = margin;
+        int baseY = margin + extraLower;
         int plateZ0 = margin;
 
         VoxelGrid grid = new(sizeX, sizeY, sizeZ, new Vector3I(centerX, baseY + plateHeight / 2, plateZ0));
@@ -58,6 +71,22 @@ public static class HumanoidGenerator
         int bodyZ1 = bodyZ0 + torchLength;
         grid.FillBox(new Vector3I(bodyX0, bodyY0, bodyZ0), new Vector3I(bodyX1, bodyY1, bodyZ1), 1);
 
+        // Handle below torch body
+        if (includeHandle)
+        {
+            int handleW = handleRadius * 2 + 1;
+            int handleX0 = centerX - handleW / 2;
+            int handleX1 = handleX0 + handleW;
+            int handleY1 = bodyY0;
+            int handleY0 = Math.Max(1, handleY1 - handleLength);
+
+            int handleZCenter = bodyZ0 + torchLength / 2;
+            int handleZ0 = handleZCenter - handleRadius;
+            int handleZ1 = handleZCenter + handleRadius + 1;
+
+            grid.FillBox(new Vector3I(handleX0, handleY0, handleZ0), new Vector3I(handleX1, handleY1, handleZ1), 1);
+        }
+
         // Flame (simple taper)
         int flameY0 = bodyY1;
         int flameZ0 = bodyZ0 + torchLength / 4;
@@ -77,6 +106,114 @@ public static class HumanoidGenerator
             int fy1 = fy0 + 1;
             grid.FillBox(new Vector3I(fx0, fy0, flameZ0), new Vector3I(fx1, fy1, flameZ1), 1);
         }
+
+        return grid;
+    }
+
+    public static VoxelGrid BuildTreasureChest(int width, int depth, int height, int lidHeight, int wallThickness, int bandThickness)
+    {
+        width = Math.Max(6, width);
+        depth = Math.Max(5, depth);
+        height = Math.Max(4, height);
+        lidHeight = Math.Max(2, lidHeight);
+        wallThickness = Math.Max(1, wallThickness);
+        bandThickness = Math.Max(1, bandThickness);
+
+        int margin = 4;
+        int sizeX = width + margin * 2;
+        int sizeZ = depth + margin * 2;
+        int sizeY = height + lidHeight + margin * 2;
+
+        int centerX = sizeX / 2;
+        int centerZ = sizeZ / 2;
+        int baseY0 = margin;
+        int baseY1 = baseY0 + height;
+
+        int minX = centerX - width / 2;
+        int maxX = minX + width;
+        int minZ = centerZ - depth / 2;
+        int maxZ = minZ + depth;
+
+        VoxelGrid grid = new(sizeX, sizeY, sizeZ, new Vector3I(centerX, baseY0 + height / 2, centerZ));
+
+        // Base box (wood)
+        grid.FillBox(new Vector3I(minX, baseY0, minZ), new Vector3I(maxX, baseY1, maxZ), 1);
+
+        // Hollow interior
+        if (wallThickness * 2 < width && wallThickness * 2 < depth)
+        {
+            grid.CarveBox(
+                new Vector3I(minX + wallThickness, baseY0 + wallThickness, minZ + wallThickness),
+                new Vector3I(maxX - wallThickness, baseY1 - wallThickness, maxZ - wallThickness));
+        }
+
+        // Rim around top of base
+        grid.FillBox(new Vector3I(minX, baseY1 - 1, minZ), new Vector3I(maxX, baseY1, maxZ), 2);
+
+        // Corner caps
+        int capY0 = baseY0;
+        int capY1 = Math.Min(baseY1, baseY0 + Math.Max(2, height / 3));
+        grid.FillBox(new Vector3I(minX, capY0, minZ), new Vector3I(minX + 1, capY1, minZ + 1), 2);
+        grid.FillBox(new Vector3I(maxX - 1, capY0, minZ), new Vector3I(maxX, capY1, minZ + 1), 2);
+        grid.FillBox(new Vector3I(minX, capY0, maxZ - 1), new Vector3I(minX + 1, capY1, maxZ), 2);
+        grid.FillBox(new Vector3I(maxX - 1, capY0, maxZ - 1), new Vector3I(maxX, capY1, maxZ), 2);
+
+        // Rounded lid (barrel)
+        float halfDepth = (depth - 1) * 0.5f;
+        for (int z = minZ; z < maxZ; z++)
+        {
+            float dz = (z - (minZ + halfDepth)) / Math.Max(1f, halfDepth);
+            float radius = Math.Clamp(1f - dz * dz, 0f, 1f);
+            int arcHeight = (int)MathF.Ceiling(radius * lidHeight);
+            int lidY0 = baseY1;
+            int lidY1 = lidY0 + arcHeight;
+
+            grid.FillBox(new Vector3I(minX, lidY0, z), new Vector3I(maxX, lidY1, z + 1), 1);
+        }
+
+        // Lid lip (slight overhang)
+        int lipY0 = Math.Max(baseY0, baseY1 - 1);
+        int lipY1 = Math.Min(baseY1, sizeY);
+        int lipFrontZ0 = Math.Max(0, minZ - 1);
+        int lipBackZ0 = Math.Min(sizeZ - 1, maxZ);
+        if (lipY1 > lipY0)
+        {
+            grid.FillBox(new Vector3I(minX, lipY0, lipFrontZ0), new Vector3I(maxX, lipY1, minZ), 2);
+            grid.FillBox(new Vector3I(minX, lipY0, lipBackZ0), new Vector3I(maxX, lipY1, Math.Min(sizeZ, lipBackZ0 + 1)), 2);
+
+            int lipSideX0 = Math.Max(0, minX - 1);
+            int lipSideX1 = Math.Min(sizeX, maxX + 1);
+            grid.FillBox(new Vector3I(lipSideX0, lipY0, minZ), new Vector3I(minX, lipY1, maxZ), 2);
+            grid.FillBox(new Vector3I(maxX, lipY0, minZ), new Vector3I(lipSideX1, lipY1, maxZ), 2);
+        }
+
+        // Metal band around center
+        int strapZ0 = Math.Clamp(minZ + depth / 2 - bandThickness / 2, minZ, maxZ - 1);
+        int strapZ1 = Math.Min(maxZ, strapZ0 + bandThickness);
+        grid.FillBox(new Vector3I(minX, baseY0, strapZ0), new Vector3I(maxX, baseY1 + lidHeight, strapZ1), 2);
+
+        // Hinges on back
+        int hingeY0 = lipY0;
+        int hingeY1 = Math.Min(baseY1 + lidHeight, hingeY0 + Math.Max(2, lidHeight / 4));
+        int hingeZ0 = maxZ - 1;
+        int hingeZ1 = maxZ;
+        int hingeW = Math.Max(1, width / 6);
+        int hingeX0 = minX + hingeW;
+        int hingeX1 = hingeX0 + hingeW;
+        int hingeX2 = maxX - hingeW * 2;
+        int hingeX3 = hingeX2 + hingeW;
+        grid.FillBox(new Vector3I(hingeX0, hingeY0, hingeZ0), new Vector3I(hingeX1, hingeY1, hingeZ1), 2);
+        grid.FillBox(new Vector3I(hingeX2, hingeY0, hingeZ0), new Vector3I(hingeX3, hingeY1, hingeZ1), 2);
+
+        // Front lock
+        int lockW = Math.Max(2, width / 5);
+        int lockH = Math.Max(2, height / 3);
+        int lockX0 = centerX - lockW / 2;
+        int lockX1 = lockX0 + lockW;
+        int lockY0 = baseY0 + height / 2 - lockH / 2;
+        int lockY1 = lockY0 + lockH;
+        int lockZ = Math.Max(0, minZ - 1);
+        grid.FillBox(new Vector3I(lockX0, lockY0, lockZ), new Vector3I(lockX1, lockY1, lockZ + 1), 3);
 
         return grid;
     }
