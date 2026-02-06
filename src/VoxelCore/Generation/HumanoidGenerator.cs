@@ -176,21 +176,27 @@ public static class HumanoidGenerator
         int lipY1 = Math.Min(baseY1, sizeY);
         int lipFrontZ0 = Math.Max(0, minZ - 1);
         int lipBackZ0 = Math.Min(sizeZ - 1, maxZ);
+        int lipSideX0 = Math.Max(0, minX - 1);
+        int lipSideX1 = Math.Min(sizeX, maxX + 1);
         if (lipY1 > lipY0)
         {
             grid.FillBox(new Vector3I(minX, lipY0, lipFrontZ0), new Vector3I(maxX, lipY1, minZ), 2);
             grid.FillBox(new Vector3I(minX, lipY0, lipBackZ0), new Vector3I(maxX, lipY1, Math.Min(sizeZ, lipBackZ0 + 1)), 2);
 
-            int lipSideX0 = Math.Max(0, minX - 1);
-            int lipSideX1 = Math.Min(sizeX, maxX + 1);
             grid.FillBox(new Vector3I(lipSideX0, lipY0, minZ), new Vector3I(minX, lipY1, maxZ), 2);
             grid.FillBox(new Vector3I(maxX, lipY0, minZ), new Vector3I(lipSideX1, lipY1, maxZ), 2);
         }
 
-        // Metal band around center
-        int strapZ0 = Math.Clamp(minZ + depth / 2 - bandThickness / 2, minZ, maxZ - 1);
+        // Metal bands
+        int strapZ0 = Math.Clamp(minZ + depth / 3 - bandThickness / 2, minZ, maxZ - 1);
         int strapZ1 = Math.Min(maxZ, strapZ0 + bandThickness);
+        int strapZ2 = Math.Clamp(minZ + depth * 2 / 3 - bandThickness / 2, minZ, maxZ - 1);
+        int strapZ3 = Math.Min(maxZ, strapZ2 + bandThickness);
         grid.FillBox(new Vector3I(minX, baseY0, strapZ0), new Vector3I(maxX, baseY1 + lidHeight, strapZ1), 2);
+        if (strapZ2 != strapZ0)
+        {
+            grid.FillBox(new Vector3I(minX, baseY0, strapZ2), new Vector3I(maxX, baseY1 + lidHeight, strapZ3), 2);
+        }
 
         // Hinges on back
         int hingeY0 = lipY0;
@@ -198,12 +204,15 @@ public static class HumanoidGenerator
         int hingeZ0 = maxZ - 1;
         int hingeZ1 = maxZ;
         int hingeW = Math.Max(1, width / 6);
-        int hingeX0 = minX + hingeW;
-        int hingeX1 = hingeX0 + hingeW;
-        int hingeX2 = maxX - hingeW * 2;
-        int hingeX3 = hingeX2 + hingeW;
-        grid.FillBox(new Vector3I(hingeX0, hingeY0, hingeZ0), new Vector3I(hingeX1, hingeY1, hingeZ1), 2);
-        grid.FillBox(new Vector3I(hingeX2, hingeY0, hingeZ0), new Vector3I(hingeX3, hingeY1, hingeZ1), 2);
+        int hingeCount = Math.Clamp(width / 6, 2, 4);
+        int hingeGap = Math.Max(1, (width - hingeCount * hingeW) / (hingeCount + 1));
+        int hingeX = minX + hingeGap;
+        for (int i = 0; i < hingeCount; i++)
+        {
+            int hx0 = hingeX + i * (hingeW + hingeGap);
+            int hx1 = Math.Min(maxX, hx0 + hingeW);
+            grid.FillBox(new Vector3I(hx0, hingeY0, hingeZ0), new Vector3I(hx1, hingeY1, hingeZ1), 2);
+        }
 
         // Front lock
         int lockW = Math.Max(2, width / 5);
@@ -215,7 +224,119 @@ public static class HumanoidGenerator
         int lockZ = Math.Max(0, minZ - 1);
         grid.FillBox(new Vector3I(lockX0, lockY0, lockZ), new Vector3I(lockX1, lockY1, lockZ + 1), 3);
 
+        // Lid lip side caps (front corners)
+        if (lipY1 > lipY0)
+        {
+            grid.FillBox(new Vector3I(lipSideX0, lipY0, lipFrontZ0), new Vector3I(minX, lipY1, minZ), 2);
+            grid.FillBox(new Vector3I(maxX, lipY0, lipFrontZ0), new Vector3I(lipSideX1, lipY1, minZ), 2);
+        }
+
         return grid;
+    }
+
+    public static VoxelGrid BuildIronBarWall(int width, int height, int depth, int frameThickness, int barRadius, int barSpacing, bool includeSideFrames)
+    {
+        width = Math.Max(6, width);
+        height = Math.Max(6, height);
+        depth = Math.Max(2, depth);
+        frameThickness = Math.Max(1, frameThickness);
+        barRadius = Math.Max(0, barRadius);
+        barSpacing = Math.Max(1, barSpacing);
+
+        int margin = 3;
+        int sizeX = width + margin * 2;
+        int sizeY = height + margin * 2;
+        int sizeZ = depth + margin * 2;
+
+        int minX = margin;
+        int maxX = minX + width;
+        int minY = margin;
+        int maxY = minY + height;
+        int minZ = margin;
+        int maxZ = minZ + depth;
+
+        VoxelGrid grid = new(sizeX, sizeY, sizeZ, new Vector3I((minX + maxX) / 2, (minY + maxY) / 2, minZ));
+
+        // Frame (top/bottom always)
+        grid.FillBox(new Vector3I(minX, minY, minZ), new Vector3I(maxX, minY + frameThickness, maxZ), 2);
+        grid.FillBox(new Vector3I(minX, maxY - frameThickness, minZ), new Vector3I(maxX, maxY, maxZ), 2);
+        if (includeSideFrames)
+        {
+            grid.FillBox(new Vector3I(minX, minY, minZ), new Vector3I(minX + frameThickness, maxY, maxZ), 2);
+            grid.FillBox(new Vector3I(maxX - frameThickness, minY, minZ), new Vector3I(maxX, maxY, maxZ), 2);
+        }
+
+        // Bars
+        int sideInset = includeSideFrames ? frameThickness : 0;
+        int innerMinX = minX + sideInset;
+        int innerMaxX = maxX - sideInset;
+        int innerMinY = minY + frameThickness;
+        int innerMaxY = maxY - frameThickness;
+        int maxBarDiameter = frameThickness >= 3 ? frameThickness - 1 : frameThickness;
+        maxBarDiameter = Math.Max(1, maxBarDiameter);
+
+        int barDiameter = Math.Max(1, barRadius * 2 + 1);
+        barDiameter = Math.Min(barDiameter, maxBarDiameter);
+        barDiameter = Math.Min(barDiameter, depth);
+        if (barDiameter % 2 == 0)
+        {
+            barDiameter -= 1;
+        }
+        if (barDiameter < 1)
+        {
+            barDiameter = 1;
+        }
+
+        int radius = (barDiameter - 1) / 2;
+        int barZCenter = minZ + depth / 2;
+
+        int span = innerMaxX - innerMinX + 1;
+        int usable = span - 2 * radius;
+        if (usable <= 0)
+        {
+            return grid;
+        }
+
+        int count = Math.Max(1, (span + barSpacing) / (barDiameter + barSpacing));
+        int used = count * barDiameter + (count - 1) * barSpacing;
+        if (used > span)
+        {
+            count = Math.Max(1, (span - barDiameter) / (barDiameter + barSpacing) + 1);
+            used = count * barDiameter + (count - 1) * barSpacing;
+        }
+
+        int leftover = Math.Max(0, span - used);
+        int startEdge = innerMinX + leftover / 2;
+
+        for (int i = 0; i < count; i++)
+        {
+            int cx = startEdge + radius + i * (barDiameter + barSpacing);
+            FillVerticalCylinder(grid, cx, barZCenter, radius, innerMinY, innerMaxY, 2);
+        }
+
+        return grid;
+    }
+
+    private static void FillVerticalCylinder(VoxelGrid grid, int centerX, int centerZ, int radius, int y0, int y1, byte material)
+    {
+        int r2 = radius * radius;
+        for (int z = centerZ - radius; z <= centerZ + radius; z++)
+        {
+            for (int x = centerX - radius; x <= centerX + radius; x++)
+            {
+                int dx = x - centerX;
+                int dz = z - centerZ;
+                if (dx * dx + dz * dz > r2)
+                {
+                    continue;
+                }
+
+                for (int y = y0; y < y1; y++)
+                {
+                    grid.Set(x, y, z, material);
+                }
+            }
+        }
     }
 
     public static VoxelGrid BuildTable(int width, int depth, int height, int legThickness, int topThickness)

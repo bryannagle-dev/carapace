@@ -19,6 +19,7 @@ public partial class TagViewerMain : Node3D
     private const int MenuGenerateTable = 11;
     private const int MenuGenerateWallTorch = 12;
     private const int MenuGenerateTreasureChest = 13;
+    private const int MenuGenerateIronBarWall = 14;
 
     private Label? _fileLabel;
     private Label? _selectionLabel;
@@ -136,6 +137,7 @@ public partial class TagViewerMain : Node3D
         popup.AddItem("Table", MenuGenerateTable);
         popup.AddItem("Wall Torch", MenuGenerateWallTorch);
         popup.AddItem("Treasure Chest", MenuGenerateTreasureChest);
+        popup.AddItem("Iron Bar Wall", MenuGenerateIronBarWall);
         popup.IdPressed += OnGenerateMenuPressed;
     }
 
@@ -227,6 +229,9 @@ public partial class TagViewerMain : Node3D
             case MenuGenerateTreasureChest:
                 ShowGenerateDialog(GenerateKind.TreasureChest);
                 break;
+            case MenuGenerateIronBarWall:
+                ShowGenerateDialog(GenerateKind.IronBarWall);
+                break;
         }
     }
 
@@ -304,6 +309,9 @@ public partial class TagViewerMain : Node3D
                 break;
             case GenerateKind.TreasureChest:
                 GenerateTreasureChest();
+                break;
+            case GenerateKind.IronBarWall:
+                GenerateIronBarWall();
                 break;
         }
 
@@ -397,6 +405,7 @@ public partial class TagViewerMain : Node3D
             GenerateKind.Table => "Table Parameters",
             GenerateKind.WallTorch => "Wall Torch Parameters",
             GenerateKind.TreasureChest => "Treasure Chest Parameters",
+            GenerateKind.IronBarWall => "Iron Bar Wall Parameters",
             _ => "Parameters",
         });
         _generateDialog.OkButtonText = "Run";
@@ -438,6 +447,16 @@ public partial class TagViewerMain : Node3D
                 new GenerateParam("lid_height", "4"),
                 new GenerateParam("wall_thickness", "1"),
                 new GenerateParam("band_thickness", "1"),
+            },
+            GenerateKind.IronBarWall => new[]
+            {
+                new GenerateParam("width", "16"),
+                new GenerateParam("height", "12"),
+                new GenerateParam("depth", "2"),
+                new GenerateParam("frame_thickness", "1"),
+                new GenerateParam("bar_radius", "1"),
+                new GenerateParam("bar_spacing", "2"),
+                new GenerateParam("side_frames_enabled", "1"),
             },
             _ => Array.Empty<GenerateParam>(),
         };
@@ -524,6 +543,30 @@ public partial class TagViewerMain : Node3D
         VoxelGrid grid = HumanoidGenerator.BuildTreasureChest(width, depth, height, lidHeight, wallThickness, bandThickness);
         byte[] palette = BuildDefaultPalette();
         string metadata = $"{{\"generator\":\"treasure_chest\",\"width\":{width},\"depth\":{depth},\"height\":{height}}}";
+
+        UseGeneratedGrid(grid, palette, metadata);
+    }
+
+    private void GenerateIronBarWall()
+    {
+        int width = ReadParamInt("width", 16);
+        int height = ReadParamInt("height", 12);
+        int depth = ReadParamInt("depth", 2);
+        int frameThickness = ReadParamInt("frame_thickness", 1);
+        int barRadius = ReadParamInt("bar_radius", ReadParamInt("bar_thickness", 1));
+        int barSpacing = ReadParamInt("bar_spacing", 2);
+        int sideFramesEnabled = ReadParamInt("side_frames_enabled", 1);
+
+        VoxelGrid grid = HumanoidGenerator.BuildIronBarWall(
+            width,
+            height,
+            depth,
+            frameThickness,
+            barRadius,
+            barSpacing,
+            sideFramesEnabled != 0);
+        byte[] palette = BuildDefaultPalette();
+        string metadata = $"{{\"generator\":\"iron_bar_wall\",\"width\":{width},\"height\":{height},\"depth\":{depth}}}";
 
         UseGeneratedGrid(grid, palette, metadata);
     }
@@ -1140,6 +1183,7 @@ public partial class TagViewerMain : Node3D
         Table,
         WallTorch,
         TreasureChest,
+        IronBarWall,
     }
 
     private enum PendingDialog
