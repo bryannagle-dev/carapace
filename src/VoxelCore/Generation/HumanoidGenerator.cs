@@ -14,6 +14,7 @@ public static class HumanoidGenerator
         int torchRadius,
         int torchLength,
         int flameHeight,
+        bool includeFlame,
         bool includeHandle,
         int handleLength,
         int handleRadius)
@@ -42,53 +43,77 @@ public static class HumanoidGenerator
 
         int plateX0 = centerX - plateWidth / 2;
         int plateX1 = plateX0 + plateWidth;
+        int plateCenterX = plateX0 + plateWidth / 2;
         int plateY0 = baseY;
         int plateY1 = plateY0 + plateHeight;
         int plateZ1 = plateZ0 + plateThickness;
 
-        // Back plate
-        grid.FillBox(new Vector3I(plateX0, plateY0, plateZ0), new Vector3I(plateX1, plateY1, plateZ1), 1);
+        // Back plate (metal)
+        grid.FillBox(new Vector3I(plateX0, plateY0, plateZ0), new Vector3I(plateX1, plateY1, plateZ1), 2);
 
         // Bracket
         int bracketW = Math.Max(1, plateWidth / 3);
         int bracketH = Math.Max(2, plateHeight / 5);
-        int bracketX0 = centerX - bracketW / 2;
+        int bracketX0 = CenterInsideSpan(plateX0, plateWidth, bracketW);
         int bracketX1 = bracketX0 + bracketW;
         int bracketY0 = plateY0 + plateHeight / 2 - bracketH / 2;
         int bracketY1 = bracketY0 + bracketH;
         int bracketZ0 = plateZ1;
         int bracketZ1 = bracketZ0 + bracketLength;
-        grid.FillBox(new Vector3I(bracketX0, bracketY0, bracketZ0), new Vector3I(bracketX1, bracketY1, bracketZ1), 1);
+        grid.FillBox(new Vector3I(bracketX0, bracketY0, bracketZ0), new Vector3I(bracketX1, bracketY1, bracketZ1), 2);
 
-        // Torch body
+        // Torch body (iron holder)
         int bodyW = torchRadius * 2 + 1;
-        int bodyH = Math.Max(4, plateHeight / 2);
-        int bodyX0 = centerX - bodyW / 2;
+        int bodyH = Math.Max(3, plateHeight / 3);
+        int bodyX0 = CenterInsideSpan(plateX0, plateWidth, bodyW);
         int bodyX1 = bodyX0 + bodyW;
         int bodyY0 = bracketY0 - 1;
         int bodyY1 = bodyY0 + bodyH;
         int bodyZ0 = bracketZ1;
         int bodyZ1 = bodyZ0 + torchLength;
-        grid.FillBox(new Vector3I(bodyX0, bodyY0, bodyZ0), new Vector3I(bodyX1, bodyY1, bodyZ1), 1);
+
+        // Wooden top (fuel) above holder
+        int woodHeight = Math.Max(1, torchLength / 2);
+        int woodY0 = bodyY1;
+        int woodY1 = woodY0 + woodHeight;
+        int bodyWidth = bodyX1 - bodyX0;
+        int insetX = Math.Clamp(bodyWidth / 4, 1, 3);
+        int woodX0 = bodyX0 + insetX;
+        int woodX1 = bodyX1 - insetX;
+        if (woodX1 <= woodX0)
+        {
+            woodX0 = bodyX0;
+            woodX1 = bodyX1;
+        }
+        int woodZ0 = bodyZ0;
+        int woodZ1 = bodyZ1;
+        int bodyDepth = bodyZ1 - bodyZ0;
+        if (bodyDepth > 2)
+        {
+            int insetZ = Math.Clamp(bodyDepth / 4, 1, 3);
+            woodZ0 = bodyZ0 + insetZ;
+            woodZ1 = bodyZ1 - insetZ;
+        }
+
+        grid.FillBox(new Vector3I(bodyX0, bodyY0, bodyZ0), new Vector3I(bodyX1, bodyY1, bodyZ1), 2);
+        grid.FillBox(new Vector3I(woodX0, woodY0, woodZ0), new Vector3I(woodX1, woodY1, woodZ1), 4);
 
         // Handle below torch body
         if (includeHandle)
         {
-            int handleW = handleRadius * 2 + 1;
-            int handleX0 = centerX - handleW / 2;
-            int handleX1 = handleX0 + handleW;
+            int handleX0 = woodX0;
+            int handleX1 = woodX1;
             int handleY1 = bodyY0;
             int handleY0 = Math.Max(1, handleY1 - handleLength);
 
-            int handleZCenter = bodyZ0 + torchLength / 2;
-            int handleZ0 = handleZCenter - handleRadius;
-            int handleZ1 = handleZCenter + handleRadius + 1;
+            int handleZ0 = woodZ0;
+            int handleZ1 = woodZ1;
 
-            grid.FillBox(new Vector3I(handleX0, handleY0, handleZ0), new Vector3I(handleX1, handleY1, handleZ1), 1);
+            grid.FillBox(new Vector3I(handleX0, handleY0, handleZ0), new Vector3I(handleX1, handleY1, handleZ1), 4);
         }
 
         // Flame (simple taper)
-        int flameY0 = bodyY1;
+        int flameY0 = woodY1;
         int flameZ0 = bodyZ0 + torchLength / 4;
         int flameZ1 = bodyZ1 - torchLength / 4;
         if (flameZ1 <= flameZ0)
@@ -97,14 +122,17 @@ public static class HumanoidGenerator
             flameZ1 = bodyZ1;
         }
 
-        for (int i = 0; i < flameHeight; i++)
+        if (includeFlame)
         {
-            int radius = Math.Max(1, torchRadius - i / 2);
-            int fx0 = centerX - radius;
-            int fx1 = centerX + radius + 1;
-            int fy0 = flameY0 + i;
-            int fy1 = fy0 + 1;
-            grid.FillBox(new Vector3I(fx0, fy0, flameZ0), new Vector3I(fx1, fy1, flameZ1), 1);
+            for (int i = 0; i < flameHeight; i++)
+            {
+                int radius = Math.Max(1, torchRadius - i / 2);
+                int fx0 = centerX - radius;
+                int fx1 = centerX + radius + 1;
+                int fy0 = flameY0 + i;
+                int fy1 = fy0 + 1;
+                grid.FillBox(new Vector3I(fx0, fy0, flameZ0), new Vector3I(fx1, fy1, flameZ1), 3);
+            }
         }
 
         return grid;
@@ -137,7 +165,7 @@ public static class HumanoidGenerator
         VoxelGrid grid = new(sizeX, sizeY, sizeZ, new Vector3I(centerX, baseY0 + height / 2, centerZ));
 
         // Base box (wood)
-        grid.FillBox(new Vector3I(minX, baseY0, minZ), new Vector3I(maxX, baseY1, maxZ), 1);
+        grid.FillBox(new Vector3I(minX, baseY0, minZ), new Vector3I(maxX, baseY1, maxZ), 4);
 
         // Hollow interior
         if (wallThickness * 2 < width && wallThickness * 2 < depth)
@@ -168,7 +196,7 @@ public static class HumanoidGenerator
             int lidY0 = baseY1;
             int lidY1 = lidY0 + arcHeight;
 
-            grid.FillBox(new Vector3I(minX, lidY0, z), new Vector3I(maxX, lidY1, z + 1), 1);
+            grid.FillBox(new Vector3I(minX, lidY0, z), new Vector3I(maxX, lidY1, z + 1), 4);
         }
 
         // Lid lip (slight overhang)
@@ -317,6 +345,207 @@ public static class HumanoidGenerator
         return grid;
     }
 
+    public static VoxelGrid BuildTree(
+        int height,
+        int trunkRadius,
+        int branchEvery,
+        int branchLength,
+        int canopyRadius,
+        int canopyHeight,
+        int canopyDensity,
+        int canopySpheres,
+        int rootLength,
+        int seed)
+    {
+        height = Math.Max(6, height);
+        trunkRadius = Math.Max(1, trunkRadius);
+        branchEvery = Math.Max(2, branchEvery);
+        branchLength = Math.Max(2, branchLength);
+        canopyRadius = Math.Max(3, canopyRadius);
+        canopyHeight = Math.Max(3, canopyHeight);
+        canopyDensity = Math.Clamp(canopyDensity, 10, 100);
+        canopySpheres = Math.Max(1, canopySpheres);
+        rootLength = Math.Max(2, rootLength);
+
+        int margin = 4;
+        int sizeX = canopyRadius * 2 + trunkRadius * 2 + margin * 2;
+        int sizeZ = canopyRadius * 2 + trunkRadius * 2 + margin * 2;
+        int sizeY = height + canopyHeight + margin * 2;
+
+        int centerX = sizeX / 2;
+        int centerZ = sizeZ / 2;
+        int baseY = margin;
+
+        VoxelGrid grid = new(sizeX, sizeY, sizeZ, new Vector3I(centerX, baseY + height / 2, centerZ));
+        Random rng = new(seed);
+
+        const byte TrunkMat = 4;
+        const byte LeafMat = 5;
+
+        // Trunk with subtle ridges
+        for (int y = baseY; y < baseY + height; y++)
+        {
+            int ridge = trunkRadius >= 2 && (y - baseY) % 4 == 0 ? 1 : 0;
+            int radius = trunkRadius + ridge;
+            FillVerticalCylinder(grid, centerX, centerZ, radius, y, y + 1, TrunkMat);
+        }
+
+        // Roots
+        int rootRadius = Math.Max(1, trunkRadius - 1);
+        for (int i = 0; i < 4; i++)
+        {
+            Vector2I dir = i switch
+            {
+                0 => new Vector2I(1, 0),
+                1 => new Vector2I(-1, 0),
+                2 => new Vector2I(0, 1),
+                _ => new Vector2I(0, -1),
+            };
+
+            int cx = centerX;
+            int cz = centerZ;
+            int cy = baseY - 1;
+            for (int step = 1; step <= rootLength; step++)
+            {
+                cx += dir.X;
+                cz += dir.Y;
+                if (step % 2 == 0 && cy > 0)
+                {
+                    cy -= 1;
+                }
+
+                FillVerticalCylinder(grid, cx, cz, rootRadius, cy, cy + 1, TrunkMat);
+            }
+        }
+
+        // Branches
+        int branchStart = baseY + trunkRadius * 2;
+        int branchEnd = baseY + height - canopyHeight / 2;
+        for (int y = branchStart; y < branchEnd; y += branchEvery)
+        {
+            if (rng.NextDouble() > 0.75)
+            {
+                continue;
+            }
+
+            Vector2I dir = rng.Next(0, 4) switch
+            {
+                0 => new Vector2I(1, 0),
+                1 => new Vector2I(-1, 0),
+                2 => new Vector2I(0, 1),
+                _ => new Vector2I(0, -1),
+            };
+
+            int radius = Math.Max(1, trunkRadius - 1);
+            int cx = centerX;
+            int cz = centerZ;
+            int cy = y;
+            for (int i = 1; i <= branchLength; i++)
+            {
+                cx += dir.X;
+                cz += dir.Y;
+                if (i > branchLength / 2)
+                {
+                    cy += 1;
+                }
+
+                FillVerticalCylinder(grid, cx, cz, radius, cy, cy + 1, TrunkMat);
+            }
+
+            // Leaf cluster at branch tip
+            FillLeafCluster(grid, cx, cy + 1, cz, 2, LeafMat, rng, canopyDensity);
+        }
+
+        // Canopy
+        int canopyCenterY = baseY + height;
+        FillCanopyClusters(grid, centerX, canopyCenterY, centerZ, canopyRadius, canopyHeight, LeafMat, rng, canopyDensity, canopySpheres);
+
+        return grid;
+    }
+
+    private static void FillCanopyClusters(VoxelGrid grid, int centerX, int centerY, int centerZ, int radius, int height, byte material, Random rng, int density, int spheres)
+    {
+        int baseRadius = Math.Max(2, radius / 2);
+        for (int i = 0; i < spheres; i++)
+        {
+            float angle = (float)(rng.NextDouble() * Math.PI * 2);
+            int offsetR = rng.Next(0, Math.Max(1, radius / 2));
+            int cx = centerX + (int)MathF.Round(MathF.Cos(angle) * offsetR);
+            int cz = centerZ + (int)MathF.Round(MathF.Sin(angle) * offsetR);
+            int cy = centerY + rng.Next(-height / 4, height / 4 + 1);
+
+            int r = baseRadius + rng.Next(0, Math.Max(1, radius - baseRadius));
+            int h = Math.Max(3, height - rng.Next(0, Math.Max(1, height / 3)));
+            FillCanopy(grid, cx, cy, cz, r, h, material, rng, density);
+        }
+    }
+
+    private static void FillCanopy(VoxelGrid grid, int centerX, int centerY, int centerZ, int radius, int height, byte material, Random rng, int density)
+    {
+        float rx = radius;
+        float ry = Math.Max(1f, height / 2f);
+        float rz = radius;
+
+        int minX = centerX - radius;
+        int maxX = centerX + radius;
+        int minZ = centerZ - radius;
+        int maxZ = centerZ + radius;
+        int minY = centerY - height / 2;
+        int maxY = centerY + height / 2;
+
+        for (int y = minY; y <= maxY; y++)
+        {
+            float dy = (y - centerY) / ry;
+            for (int z = minZ; z <= maxZ; z++)
+            {
+                float dz = (z - centerZ) / rz;
+                for (int x = minX; x <= maxX; x++)
+                {
+                    float dx = (x - centerX) / rx;
+                    float d = dx * dx + dy * dy + dz * dz;
+                    if (d > 1f)
+                    {
+                        continue;
+                    }
+
+                    if (rng.Next(0, 100) > density)
+                    {
+                        continue;
+                    }
+
+                    grid.Set(x, y, z, material);
+                }
+            }
+        }
+    }
+
+    private static void FillLeafCluster(VoxelGrid grid, int centerX, int centerY, int centerZ, int radius, byte material, Random rng, int density)
+    {
+        for (int y = centerY - radius; y <= centerY + radius; y++)
+        {
+            for (int z = centerZ - radius; z <= centerZ + radius; z++)
+            {
+                for (int x = centerX - radius; x <= centerX + radius; x++)
+                {
+                    int dx = x - centerX;
+                    int dy = y - centerY;
+                    int dz = z - centerZ;
+                    if (dx * dx + dy * dy + dz * dz > radius * radius)
+                    {
+                        continue;
+                    }
+
+                    if (rng.Next(0, 100) > density)
+                    {
+                        continue;
+                    }
+
+                    grid.Set(x, y, z, material);
+                }
+            }
+        }
+    }
+
     private static void FillVerticalCylinder(VoxelGrid grid, int centerX, int centerZ, int radius, int y0, int y1, byte material)
     {
         int r2 = radius * radius;
@@ -362,8 +591,12 @@ public static class HumanoidGenerator
         int minZ = centerZ - depth / 2;
         int maxZ = minZ + depth;
 
-        // Tabletop
-        grid.FillBox(new Vector3I(minX, topY, minZ), new Vector3I(maxX, topY + topThickness, maxZ), 1);
+        // Tabletop (wood) with plank stripes
+        for (int z = minZ; z < maxZ; z++)
+        {
+            byte mat = ((z - minZ) % 2 == 0) ? (byte)4 : (byte)6;
+            grid.FillBox(new Vector3I(minX, topY, z), new Vector3I(maxX, topY + topThickness, z + 1), mat);
+        }
 
         // Legs
         int legY0 = 2;
@@ -377,10 +610,10 @@ public static class HumanoidGenerator
         int bz0 = maxZ - legThickness;
         int bz1 = maxZ;
 
-        grid.FillBox(new Vector3I(lx0, legY0, fz0), new Vector3I(lx1, legY1, fz1), 1);
-        grid.FillBox(new Vector3I(rx0, legY0, fz0), new Vector3I(rx1, legY1, fz1), 1);
-        grid.FillBox(new Vector3I(lx0, legY0, bz0), new Vector3I(lx1, legY1, bz1), 1);
-        grid.FillBox(new Vector3I(rx0, legY0, bz0), new Vector3I(rx1, legY1, bz1), 1);
+        grid.FillBox(new Vector3I(lx0, legY0, fz0), new Vector3I(lx1, legY1, fz1), 4);
+        grid.FillBox(new Vector3I(rx0, legY0, fz0), new Vector3I(rx1, legY1, fz1), 4);
+        grid.FillBox(new Vector3I(lx0, legY0, bz0), new Vector3I(lx1, legY1, bz1), 4);
+        grid.FillBox(new Vector3I(rx0, legY0, bz0), new Vector3I(rx1, legY1, bz1), 4);
 
         return grid;
     }
@@ -815,6 +1048,17 @@ public static class HumanoidGenerator
     private static int RoundToInt(float value)
     {
         return (int)MathF.Round(value, MidpointRounding.AwayFromZero);
+    }
+
+    private static int CenterInsideSpan(int min, int span, int inner)
+    {
+        if (inner >= span)
+        {
+            return min;
+        }
+
+        float offset = (span - inner) * 0.5f;
+        return min + RoundToInt(offset);
     }
 
     private static void AddHipsAndLegs(

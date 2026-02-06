@@ -116,3 +116,6 @@ text = "Apply"
 
 [node name="ParamsGrid" type="GridContainer" parent="CanvasLayer/UIRoot/GenerateDialog/GenerateVBox"]
 columns = 2
+
+[node name="ResetDefaults" type="Button" parent="CanvasLayer/UIRoot/GenerateDialog/GenerateVBox"]
+text = "Reset Defaults"
