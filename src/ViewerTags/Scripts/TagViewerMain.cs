@@ -27,6 +27,7 @@ public partial class TagViewerMain : Node3D
     private Label? _tagsLabel;
     private Label? _generateTitle;
     private LineEdit? _tagName;
+    private OptionButton? _tagList;
     private OptionButton? _direction;
     private MenuButton? _generateMenu;
     private Button? _applyTag;
@@ -55,6 +56,7 @@ public partial class TagViewerMain : Node3D
     private readonly Dictionary<string, LineEdit> _paramInputs = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _paramDefaults = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _lastParams = new(StringComparer.OrdinalIgnoreCase);
+    private bool _updatingTagList;
     private GenerateKind _pendingGenerate = GenerateKind.None;
 
     private PendingDialog _pendingDialog = PendingDialog.None;
@@ -66,6 +68,7 @@ public partial class TagViewerMain : Node3D
         _tagsLabel = GetNodeOrNull<Label>("CanvasLayer/UIRoot/TagPanel/TagVBox/LabelTags");
         _generateTitle = GetNodeOrNull<Label>("CanvasLayer/UIRoot/GenerateDialog/GenerateVBox/GenerateTitle");
         _tagName = GetNodeOrNull<LineEdit>("CanvasLayer/UIRoot/TagPanel/TagVBox/TagName");
+        _tagList = GetNodeOrNull<OptionButton>("CanvasLayer/UIRoot/TagPanel/TagVBox/TagList");
         _direction = GetNodeOrNull<OptionButton>("CanvasLayer/UIRoot/TagPanel/TagVBox/Direction");
         _generateMenu = GetNodeOrNull<MenuButton>("CanvasLayer/UIRoot/TopBar/GenerateMenu");
         _applyTag = GetNodeOrNull<Button>("CanvasLayer/UIRoot/TagPanel/TagVBox/ApplyTag");
@@ -204,6 +207,11 @@ public partial class TagViewerMain : Node3D
         if (_resetDefaults != null)
         {
             _resetDefaults.Pressed += ResetDefaults;
+        }
+
+        if (_tagList != null)
+        {
+            _tagList.ItemSelected += OnTagListSelected;
         }
     }
 
@@ -801,35 +809,40 @@ public partial class TagViewerMain : Node3D
 
     private TagGroupRuntime? BuildTorchEmitterTag(VoxelGrid grid, string name, string direction)
     {
-        if (!TryComputeBounds(grid, out Vector3 min, out Vector3 max))
+        int topWoodY = -1;
+        for (int y = grid.SizeY - 1; y >= 0 && topWoodY < 0; y--)
         {
-            return null;
-        }
-
-        int minX = (int)MathF.Floor(min.X);
-        int maxX = (int)MathF.Ceiling(max.X);
-        int minZ = (int)MathF.Floor(min.Z);
-        int maxZ = (int)MathF.Ceiling(max.Z);
-        int topY = (int)MathF.Ceiling(max.Y) - 1;
-
-        TagGroupRuntime tag = new(name, direction);
-        for (int z = minZ; z < maxZ; z++)
-        {
-            for (int x = minX; x < maxX; x++)
+            for (int z = 0; z < grid.SizeZ && topWoodY < 0; z++)
             {
-                if (grid.GetSafe(x, topY, z) == 4)
+                for (int x = 0; x < grid.SizeX; x++)
                 {
-                    tag.Voxels.Add(new Vector3I(x, topY, z));
+                    if (grid.GetSafe(x, y, z) == 4)
+                    {
+                        topWoodY = y;
+                        break;
+                    }
                 }
             }
         }
 
-        if (tag.Voxels.Count == 0)
+        if (topWoodY < 0)
         {
             return null;
         }
 
-        return tag;
+        TagGroupRuntime tag = new(name, direction);
+        for (int z = 0; z < grid.SizeZ; z++)
+        {
+            for (int x = 0; x < grid.SizeX; x++)
+            {
+                if (grid.GetSafe(x, topWoodY, z) == 4)
+                {
+                    tag.Voxels.Add(new Vector3I(x, topWoodY, z));
+                }
+            }
+        }
+
+        return tag.Voxels.Count == 0 ? null : tag;
     }
 
     private Vector3I FindNearestFilled(VoxelGrid grid, Vector3I origin)
@@ -1207,6 +1220,8 @@ public partial class TagViewerMain : Node3D
                 _fileLabel.Text = Path.GetFileName(_currentPath);
             }
         }
+
+        RefreshTagList();
     }
 
     private void LoadTagsFromMetadata()
@@ -1251,6 +1266,105 @@ public partial class TagViewerMain : Node3D
 
             _tags[tag.Name] = runtime;
         }
+    }
+
+    private void RefreshTagList()
+    {
+        if (_tagList == null)
+        {
+            return;
+        }
+
+        string? current = GetSelectedTagName();
+
+        _updatingTagList = true;
+        _tagList.Clear();
+        _tagList.AddItem("Select tag...", 0);
+
+        List<string> names = new(_tags.Keys);
+        names.Sort(StringComparer.OrdinalIgnoreCase);
+
+        int selectedIndex = 0;
+        int index = 1;
+        foreach (string name in names)
+        {
+            _tagList.AddItem(name, index);
+            _tagList.SetItemMetadata(index, name);
+            if (!string.IsNullOrWhiteSpace(current) && string.Equals(current, name, StringComparison.OrdinalIgnoreCase))
+            {
+                selectedIndex = index;
+            }
+            index++;
+        }
+
+        _tagList.Selected = selectedIndex;
+        _updatingTagList = false;
+    }
+
+    private void OnTagListSelected(long index)
+    {
+        if (_updatingTagList)
+        {
+            return;
+        }
+
+        if (_tagList == null)
+        {
+            return;
+        }
+
+        Variant meta = _tagList.GetItemMetadata((int)index);
+        if (meta.VariantType == Variant.Type.Nil)
+        {
+            return;
+        }
+
+        string name = meta.AsString();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        if (_tagName != null)
+        {
+            _tagName.Text = name;
+        }
+
+        SelectVoxelsForTag(name);
+    }
+
+    private void SelectVoxelsForTag(string name)
+    {
+        if (!_tags.TryGetValue(name, out TagGroupRuntime? group) || group == null)
+        {
+            return;
+        }
+
+        _selectedVoxels.Clear();
+        foreach (Vector3I voxel in group.Voxels)
+        {
+            _selectedVoxels.Add(voxel);
+        }
+
+        UpdateSelectionMesh();
+        UpdateUi();
+    }
+
+    private string? GetSelectedTagName()
+    {
+        if (_tagList == null)
+        {
+            return null;
+        }
+
+        int selected = _tagList.Selected;
+        if (selected <= 0)
+        {
+            return null;
+        }
+
+        Variant meta = _tagList.GetItemMetadata(selected);
+        return meta.VariantType == Variant.Type.Nil ? null : meta.AsString();
     }
 
     private void PersistMetadataWithTags()

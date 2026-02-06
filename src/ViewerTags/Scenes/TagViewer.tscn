@@ -68,6 +68,11 @@ text = "Selected: 0"
 [node name="LabelTags" type="Label" parent="CanvasLayer/UIRoot/TagPanel/TagVBox"]
 text = "Tags: 0"
 
+[node name="LabelTagSelect" type="Label" parent="CanvasLayer/UIRoot/TagPanel/TagVBox"]
+text = "Select Tag"
+
+[node name="TagList" type="OptionButton" parent="CanvasLayer/UIRoot/TagPanel/TagVBox"]
+
 [node name="TagName" type="LineEdit" parent="CanvasLayer/UIRoot/TagPanel/TagVBox"]
 placeholder_text = "Tag name"
 
