@@ -17,6 +17,7 @@ public partial class TagViewerMain : Node3D
     private const int MenuExportVox = 4;
     private const int MenuGenerateHumanoid = 10;
     private const int MenuGenerateTable = 11;
+    private const int MenuGenerateWallTorch = 12;
 
     private Label? _fileLabel;
     private Label? _selectionLabel;
@@ -128,6 +129,7 @@ public partial class TagViewerMain : Node3D
         popup.Clear();
         popup.AddItem("Humanoid", MenuGenerateHumanoid);
         popup.AddItem("Table", MenuGenerateTable);
+        popup.AddItem("Wall Torch", MenuGenerateWallTorch);
         popup.IdPressed += OnGenerateMenuPressed;
     }
 
@@ -208,6 +210,9 @@ public partial class TagViewerMain : Node3D
             case MenuGenerateTable:
                 ShowGenerateDialog(GenerateKind.Table);
                 break;
+            case MenuGenerateWallTorch:
+                ShowGenerateDialog(GenerateKind.WallTorch);
+                break;
         }
     }
 
@@ -279,6 +284,9 @@ public partial class TagViewerMain : Node3D
                 break;
             case GenerateKind.Table:
                 GenerateTable();
+                break;
+            case GenerateKind.WallTorch:
+                GenerateWallTorch();
                 break;
         }
 
@@ -366,7 +374,13 @@ public partial class TagViewerMain : Node3D
             child.QueueFree();
         }
 
-        _generateTitle?.SetText(kind == GenerateKind.Humanoid ? "Humanoid Parameters" : "Table Parameters");
+        _generateTitle?.SetText(kind switch
+        {
+            GenerateKind.Humanoid => "Humanoid Parameters",
+            GenerateKind.Table => "Table Parameters",
+            GenerateKind.WallTorch => "Wall Torch Parameters",
+            _ => "Parameters",
+        });
         _generateDialog.OkButtonText = "Run";
 
         IEnumerable<GenerateParam> parameters = kind switch
@@ -384,6 +398,16 @@ public partial class TagViewerMain : Node3D
                 new GenerateParam("height", "10"),
                 new GenerateParam("leg_thickness", "2"),
                 new GenerateParam("top_thickness", "2"),
+            },
+            GenerateKind.WallTorch => new[]
+            {
+                new GenerateParam("plate_width", "7"),
+                new GenerateParam("plate_height", "10"),
+                new GenerateParam("plate_thickness", "1"),
+                new GenerateParam("bracket_length", "4"),
+                new GenerateParam("torch_radius", "2"),
+                new GenerateParam("torch_length", "4"),
+                new GenerateParam("flame_height", "4"),
             },
             _ => Array.Empty<GenerateParam>(),
         };
@@ -424,6 +448,23 @@ public partial class TagViewerMain : Node3D
         VoxelGrid grid = HumanoidGenerator.BuildTable(width, depth, height, legThickness, topThickness);
         byte[] palette = BuildDefaultPalette();
         string metadata = $"{{\"generator\":\"table\",\"width\":{width},\"depth\":{depth},\"height\":{height}}}";
+
+        UseGeneratedGrid(grid, palette, metadata);
+    }
+
+    private void GenerateWallTorch()
+    {
+        int plateWidth = ReadParamInt("plate_width", 7);
+        int plateHeight = ReadParamInt("plate_height", 10);
+        int plateThickness = ReadParamInt("plate_thickness", 1);
+        int bracketLength = ReadParamInt("bracket_length", 4);
+        int torchRadius = ReadParamInt("torch_radius", 2);
+        int torchLength = ReadParamInt("torch_length", 4);
+        int flameHeight = ReadParamInt("flame_height", 4);
+
+        VoxelGrid grid = HumanoidGenerator.BuildWallTorch(plateWidth, plateHeight, plateThickness, bracketLength, torchRadius, torchLength, flameHeight);
+        byte[] palette = BuildDefaultPalette();
+        string metadata = $"{{\"generator\":\"wall_torch\",\"plate_width\":{plateWidth},\"plate_height\":{plateHeight},\"bracket_length\":{bracketLength}}}";
 
         UseGeneratedGrid(grid, palette, metadata);
     }
@@ -999,6 +1040,7 @@ public partial class TagViewerMain : Node3D
         None,
         Humanoid,
         Table,
+        WallTorch,
     }
 
     private enum PendingDialog

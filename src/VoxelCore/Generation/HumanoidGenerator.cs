@@ -6,6 +6,81 @@ namespace VoxelCore.Generation;
 
 public static class HumanoidGenerator
 {
+    public static VoxelGrid BuildWallTorch(int plateWidth, int plateHeight, int plateThickness, int bracketLength, int torchRadius, int torchLength, int flameHeight)
+    {
+        plateWidth = Math.Max(3, plateWidth);
+        plateHeight = Math.Max(4, plateHeight);
+        plateThickness = Math.Clamp(plateThickness, 1, 4);
+        bracketLength = Math.Max(2, bracketLength);
+        torchRadius = Math.Max(1, torchRadius);
+        torchLength = Math.Max(3, torchLength);
+        flameHeight = Math.Max(2, flameHeight);
+
+        int margin = 3;
+        int sizeX = plateWidth + margin * 2;
+        int sizeY = plateHeight + flameHeight + margin * 2;
+        int sizeZ = plateThickness + bracketLength + torchLength + margin * 2;
+
+        int centerX = sizeX / 2;
+        int baseY = margin;
+        int plateZ0 = margin;
+
+        VoxelGrid grid = new(sizeX, sizeY, sizeZ, new Vector3I(centerX, baseY + plateHeight / 2, plateZ0));
+
+        int plateX0 = centerX - plateWidth / 2;
+        int plateX1 = plateX0 + plateWidth;
+        int plateY0 = baseY;
+        int plateY1 = plateY0 + plateHeight;
+        int plateZ1 = plateZ0 + plateThickness;
+
+        // Back plate
+        grid.FillBox(new Vector3I(plateX0, plateY0, plateZ0), new Vector3I(plateX1, plateY1, plateZ1), 1);
+
+        // Bracket
+        int bracketW = Math.Max(1, plateWidth / 3);
+        int bracketH = Math.Max(2, plateHeight / 5);
+        int bracketX0 = centerX - bracketW / 2;
+        int bracketX1 = bracketX0 + bracketW;
+        int bracketY0 = plateY0 + plateHeight / 2 - bracketH / 2;
+        int bracketY1 = bracketY0 + bracketH;
+        int bracketZ0 = plateZ1;
+        int bracketZ1 = bracketZ0 + bracketLength;
+        grid.FillBox(new Vector3I(bracketX0, bracketY0, bracketZ0), new Vector3I(bracketX1, bracketY1, bracketZ1), 1);
+
+        // Torch body
+        int bodyW = torchRadius * 2 + 1;
+        int bodyH = Math.Max(4, plateHeight / 2);
+        int bodyX0 = centerX - bodyW / 2;
+        int bodyX1 = bodyX0 + bodyW;
+        int bodyY0 = bracketY0 - 1;
+        int bodyY1 = bodyY0 + bodyH;
+        int bodyZ0 = bracketZ1;
+        int bodyZ1 = bodyZ0 + torchLength;
+        grid.FillBox(new Vector3I(bodyX0, bodyY0, bodyZ0), new Vector3I(bodyX1, bodyY1, bodyZ1), 1);
+
+        // Flame (simple taper)
+        int flameY0 = bodyY1;
+        int flameZ0 = bodyZ0 + torchLength / 4;
+        int flameZ1 = bodyZ1 - torchLength / 4;
+        if (flameZ1 <= flameZ0)
+        {
+            flameZ0 = bodyZ0;
+            flameZ1 = bodyZ1;
+        }
+
+        for (int i = 0; i < flameHeight; i++)
+        {
+            int radius = Math.Max(1, torchRadius - i / 2);
+            int fx0 = centerX - radius;
+            int fx1 = centerX + radius + 1;
+            int fy0 = flameY0 + i;
+            int fy1 = fy0 + 1;
+            grid.FillBox(new Vector3I(fx0, fy0, flameZ0), new Vector3I(fx1, fy1, flameZ1), 1);
+        }
+
+        return grid;
+    }
+
     public static VoxelGrid BuildTable(int width, int depth, int height, int legThickness, int topThickness)
     {
         width = Math.Max(4, width);
